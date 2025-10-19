@@ -17,7 +17,6 @@
 
 static const char *TAG = "MAIN";
 
-#define DEFAULT_AP_PASS "composite"
 #define NOTIFY_INTERVAL_MS 50
 
 static hid_device_t *g_device = NULL;
@@ -433,7 +432,7 @@ static void on_control_message(cJSON *msg)
                     {
                         // Fallback to AP mode
                         wifi_manager_stop();
-                        wifi_manager_start_ap(NULL, DEFAULT_AP_PASS);
+                        wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
                         cJSON_AddStringToObject(response, "mode", "ap");
                         cJSON_AddStringToObject(response, "ip", "192.168.4.1");
                         status_changed = true;
@@ -478,7 +477,7 @@ static void on_control_message(cJSON *msg)
         if (err == ESP_OK)
         {
             wifi_manager_stop();
-            wifi_manager_start_ap(NULL, DEFAULT_AP_PASS);
+            wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
             cJSON_AddBoolToObject(response, "ok", true);
             notify_wifi_status();
             broadcast_ble_status();
@@ -589,8 +588,16 @@ void app_main(void)
     // If not connected, start AP mode
     if (!wifi_manager_is_connected())
     {
-        wifi_manager_start_ap(NULL, DEFAULT_AP_PASS);
-        ESP_LOGI(TAG, "AP mode active: %s", wifi_manager_get_ap_ssid());
+        wifi_manager_stop();
+        esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+        if (ap_err == ESP_OK)
+        {
+            ESP_LOGI(TAG, "AP mode active: %s", wifi_manager_get_ap_ssid());
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to start AP mode: %s", esp_err_to_name(ap_err));
+        }
     }
 
     // Initialize transports
