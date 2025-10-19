@@ -841,6 +841,13 @@ esp_err_t ble_hid_init(const char *device_name)
         return ESP_FAIL;
     }
 
+    rc = ble_gatts_start();
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "Failed to start GATT services; rc=%d", rc);
+        return ESP_FAIL;
+    }
+
     // Set device name and appearance
     ble_svc_gap_device_name_set(s_device_name);
     ble_svc_gap_device_appearance_set(0x03C2); // Generic HID appearance
