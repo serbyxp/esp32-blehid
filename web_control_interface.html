@@ -427,9 +427,9 @@
                 <span class="keyboard-key" onclick="pressKey(0x04)">A</span>
                 <span class="keyboard-key" onclick="pressKey(0x05)">B</span>
                 <span class="keyboard-key" onclick="pressKey(0x06)">C</span>
-                <span class="keyboard-key" onclick="pressKey(0x1E)">1</span>
-                <span class="keyboard-key" onclick="pressKey(0x1F)">2</span>
-                <span class="keyboard-key" onclick="pressKey(0x20)">3</span>
+                <span class="keyboard-key" onclick="sendKeyboardText('1')">1</span>
+                <span class="keyboard-key" onclick="sendKeyboardText('2')">2</span>
+                <span class="keyboard-key" onclick="sendKeyboardText('3')">3</span>
                 <span class="keyboard-key" onclick="pressKey(0x28)">Enter</span>
                 <span class="keyboard-key" onclick="pressKey(0x2A)">Backspace</span>
             </div>
@@ -501,17 +501,6 @@
         let stats = { messages: 0, mouse: 0, keyboard: 0, consumer: 0 };
         let mouseState = { buttons: { left: false, right: false, middle: false } };
         let testRunning = false;
-
-        // HID USB Key Codes
-        const HID_KEYS = {
-            'a': 0x04, 'b': 0x05, 'c': 0x06, 'd': 0x07, 'e': 0x08, 'f': 0x09,
-            'g': 0x0A, 'h': 0x0B, 'i': 0x0C, 'j': 0x0D, 'k': 0x0E, 'l': 0x0F,
-            'm': 0x10, 'n': 0x11, 'o': 0x12, 'p': 0x13, 'q': 0x14, 'r': 0x15,
-            's': 0x16, 't': 0x17, 'u': 0x18, 'v': 0x19, 'w': 0x1A, 'x': 0x1B,
-            'y': 0x1C, 'z': 0x1D, '1': 0x1E, '2': 0x1F, '3': 0x20, '4': 0x21,
-            '5': 0x22, '6': 0x23, '7': 0x24, '8': 0x25, '9': 0x26, '0': 0x27,
-            ' ': 0x2C, '!': 0x1E, '@': 0x1F, '#': 0x20
-        };
 
         // Logging
         function log(message, type = 'info') {
@@ -744,22 +733,21 @@
             log(`Key pressed: 0x${keycode.toString(16)}`, 'info');
         }
 
-        function typeText() {
-            const text = document.getElementById('textToType').value.toLowerCase();
-            let delay = 0;
-
-            for (let char of text) {
-                if (HID_KEYS[char]) {
-                    const needsShift = '!@#$%^&*()'.includes(char);
-                    setTimeout(() => {
-                        sendKeyboard([HID_KEYS[char]], needsShift ? 0x02 : 0);
-                        setTimeout(() => sendKeyboard([]), 50);
-                    }, delay);
-                    delay += 100;
-                }
+        function sendKeyboardText(text) {
+            if (!text) {
+                return;
             }
 
-            log(`Typing: "${text}"`, 'info');
+            if (sendMessage({ type: 'keyboard', text })) {
+                stats.keyboard += text.length;
+                updateStats();
+                log(`Typing: "${text}"`, 'info');
+            }
+        }
+
+        function typeText() {
+            const text = document.getElementById('textToType').value;
+            sendKeyboardText(text);
         }
 
         // Consumer Control
