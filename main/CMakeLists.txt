@@ -1,0 +1,24 @@
+idf_component_register(
+    SRCS 
+        "main.c"
+        "hid_device.c"
+        "ble_hid.c"
+        "transport_uart.c"
+        "transport_ws.c"
+        "wifi_manager.c"
+        "nvs_keystore.c"
+        "http_server.c"
+        "dns_server.c"
+        "hid_keymap.c"
+    INCLUDE_DIRS "."
+    REQUIRES 
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_http_server
+        bt
+        driver
+        json
+    EMBED_FILES
+        "web/index.html"
+)

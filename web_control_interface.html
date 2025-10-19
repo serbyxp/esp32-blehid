@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Composite HID - Test Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            font-size: 2.5em;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h2 {
+            color: #667eea;
+            margin-bottom: 16px;
+            font-size: 1.5em;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 8px;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #ff4444;
+            box-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+            animation: pulse-red 2s infinite;
+        }
+
+        .status-indicator.connected {
+            background: #44ff44;
+            box-shadow: 0 0 15px rgba(68, 255, 68, 0.7);
+            animation: pulse-green 2s infinite;
+        }
+
+        @keyframes pulse-red {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        @keyframes pulse-green {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.8;
+                transform: scale(1.1);
+            }
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.secondary {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+        }
+
+        button.danger {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+
+        button.success {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+        }
+
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .test-button {
+            padding: 20px;
+            text-align: center;
+            background: #f8f9fa;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid #e0e0e0;
+        }
+
+        .test-button:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+            transform: scale(1.05);
+        }
+
+        .test-button:active {
+            transform: scale(0.95);
+        }
+
+        .mouse-pad {
+            width: 100%;
+            height: 350px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            cursor: crosshair;
+            position: relative;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        .mouse-pad::before {
+            content: 'Drag to move mouse';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #999;
+            font-size: 18px;
+            pointer-events: none;
+        }
+
+        .mouse-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .log-container {
+            max-height: 300px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            color: #d4d4d4;
+        }
+
+        .log-entry {
+            margin-bottom: 6px;
+            padding: 6px 10px;
+            border-left: 3px solid #667eea;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 4px;
+        }
+
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            background: rgba(231, 76, 60, 0.1);
+            color: #ff6b6b;
+        }
+
+        .log-entry.success {
+            border-left-color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+            color: #51cf66;
+        }
+
+        .log-entry.info {
+            border-left-color: #3498db;
+            background: rgba(52, 152, 219, 0.1);
+            color: #74c0fc;
+        }
+
+        .timestamp {
+            color: #999;
+            font-size: 11px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+
+        .keyboard-key {
+            display: inline-block;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+            margin: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .keyboard-key:active {
+            background: #667eea;
+            color: white;
+            transform: translateY(2px);
+        }
+
+        textarea {
+            font-family: monospace;
+            resize: vertical;
+            min-height: 100px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🖱️ ESP32 Composite HID - Test Suite</h1>
+
+        <!-- Status Bar -->
+        <div class="card">
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-indicator" id="wsStatus"></span>
+                    <span><strong>WebSocket:</strong> <span id="wsStatusText">Disconnected</span></span>
+                </div>
+                <div class="status-item">
+                    <span><strong>BLE State:</strong> <span id="bleState">Unknown</span></span>
+                </div>
+                <div class="status-item">
+                    <span><strong>Bonded:</strong> <span id="bondedState">Unknown</span></span>
+                </div>
+                <div class="status-item">
+                    <span><strong>WiFi:</strong> <span id="wifiMode">Unknown</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection -->
+        <div class="card">
+            <h2>🔌 Connection</h2>
+            <div class="input-group">
+                <label for="wsUrl">WebSocket URL</label>
+                <input type="text" id="wsUrl" value="ws://192.168.4.1:8765/ws" placeholder="ws://host:port/ws">
+            </div>
+            <button onclick="connectWS()" class="success">Connect</button>
+            <button onclick="disconnectWS()" class="secondary">Disconnect</button>
+            <button onclick="requestStatus()" class="secondary">Refresh Status</button>
+        </div>
+
+        <!-- Statistics -->
+        <div class="card">
+            <h2>📊 Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="statMessages">0</div>
+                    <div class="stat-label">Messages Sent</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statMouse">0</div>
+                    <div class="stat-label">Mouse Events</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statKeyboard">0</div>
+                    <div class="stat-label">Keyboard Events</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statConsumer">0</div>
+                    <div class="stat-label">Consumer Events</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mouse Testing -->
+        <div class="card">
+            <h2>🖱️ Mouse Testing</h2>
+            <div class="mouse-pad" id="mousePad"></div>
+            <div class="mouse-buttons">
+                <button onmousedown="setMouseButton('left', true)" onmouseup="setMouseButton('left', false)"
+                    ontouchstart="setMouseButton('left', true)" ontouchend="setMouseButton('left', false)">
+                    Left Click
+                </button>
+                <button onmousedown="setMouseButton('middle', true)" onmouseup="setMouseButton('middle', false)"
+                    ontouchstart="setMouseButton('middle', true)" ontouchend="setMouseButton('middle', false)">
+                    Middle Click
+                </button>
+                <button onmousedown="setMouseButton('right', true)" onmouseup="setMouseButton('right', false)"
+                    ontouchstart="setMouseButton('right', true)" ontouchend="setMouseButton('right', false)">
+                    Right Click
+                </button>
+            </div>
+            <div style="margin-top: 16px;">
+                <button onclick="scrollWheel(1)">↑ Scroll Up</button>
+                <button onclick="scrollWheel(-1)">↓ Scroll Down</button>
+                <button onclick="testMouseCircle()">Test: Circle Motion</button>
+                <button onclick="testMouseClick()">Test: Click Sequence</button>
+            </div>
+        </div>
+
+        <!-- Keyboard Testing -->
+        <div class="card">
+            <h2>⌨️ Keyboard Testing</h2>
+            <div class="input-group">
+                <label for="textToType">Text to Type</label>
+                <textarea id="textToType" placeholder="Enter text to type...">Hello from ESP32!</textarea>
+            </div>
+            <button onclick="typeText()" class="success">Type Text</button>
+            <button onclick="pressKey(0x28)">Press Enter</button>
+            <button onclick="pressKey(0x2C)">Press Space</button>
+            <button onclick="testKeyboardSequence()">Test: Key Sequence</button>
+
+            <div style="margin-top: 20px;">
+                <strong>Quick Keys:</strong><br>
+                <span class="keyboard-key" onclick="pressKey(0x04)">A</span>
+                <span class="keyboard-key" onclick="pressKey(0x05)">B</span>
+                <span class="keyboard-key" onclick="pressKey(0x06)">C</span>
+                <span class="keyboard-key" onclick="pressKey(0x1E)">1</span>
+                <span class="keyboard-key" onclick="pressKey(0x1F)">2</span>
+                <span class="keyboard-key" onclick="pressKey(0x20)">3</span>
+                <span class="keyboard-key" onclick="pressKey(0x28)">Enter</span>
+                <span class="keyboard-key" onclick="pressKey(0x2A)">Backspace</span>
+            </div>
+        </div>
+
+        <!-- Consumer Control Testing -->
+        <div class="card">
+            <h2>🎵 Media Controls Testing</h2>
+            <div class="test-grid">
+                <div class="test-button" onclick="sendConsumer(0xE9)">🔊 Volume Up</div>
+                <div class="test-button" onclick="sendConsumer(0xEA)">🔉 Volume Down</div>
+                <div class="test-button" onclick="sendConsumer(0xE2)">🔇 Mute</div>
+                <div class="test-button" onclick="sendConsumer(0xCD)">▶️ Play/Pause</div>
+                <div class="test-button" onclick="sendConsumer(0xB5)">⏭️ Next Track</div>
+                <div class="test-button" onclick="sendConsumer(0xB6)">⏮️ Previous Track</div>
+                <div class="test-button" onclick="sendConsumer(0xB7)">⏹️ Stop</div>
+                <div class="test-button" onclick="sendConsumer(0x0223)">🏠 Home</div>
+            </div>
+            <div style="margin-top: 16px;">
+                <button onclick="testMediaSequence()">Test: Media Sequence</button>
+            </div>
+        </div>
+
+        <!-- Device Control -->
+        <div class="card">
+            <h2>🎛️ Device Control</h2>
+            <button onclick="sendControl('force_adv')" class="success">▶️ Start Advertising</button>
+            <button onclick="sendControl('quiet')" class="secondary">⏸️ Stop Advertising</button>
+            <button onclick="sendControl('forget')" class="danger">🗑️ Clear Bonding</button>
+            <button onclick="sendControl('wifi_get')" class="secondary">📡 Get WiFi Status</button>
+        </div>
+
+        <!-- WiFi Configuration -->
+        <div class="card">
+            <h2>📡 WiFi Configuration</h2>
+            <div class="input-group">
+                <label for="wifiSsid">Network SSID</label>
+                <input type="text" id="wifiSsid" placeholder="Your WiFi network name">
+            </div>
+            <div class="input-group">
+                <label for="wifiPass">Password</label>
+                <input type="password" id="wifiPass" placeholder="WiFi password">
+            </div>
+            <button onclick="configureWifi()" class="success">Connect to WiFi</button>
+        </div>
+
+        <!-- Automated Tests -->
+        <div class="card">
+            <h2>🧪 Automated Tests</h2>
+            <button onclick="runFullTest()">▶️ Run Full Test Suite</button>
+            <button onclick="runBondingTest()">🔐 Test Bonding Flow</button>
+            <button onclick="runReconnectTest()">🔄 Test Reconnection</button>
+            <button onclick="stopTests()" class="danger">⏹️ Stop Tests</button>
+            <div id="testProgress" style="margin-top: 12px; color: #667eea; font-weight: bold;"></div>
+        </div>
+
+        <!-- Log -->
+        <div class="card">
+            <h2>📝 Event Log</h2>
+            <div class="log-container" id="logContainer"></div>
+            <button onclick="clearLog()" class="secondary" style="margin-top: 12px;">Clear Log</button>
+            <button onclick="exportLog()" class="secondary">Export Log</button>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let ws = null;
+        let stats = { messages: 0, mouse: 0, keyboard: 0, consumer: 0 };
+        let mouseState = { buttons: { left: false, right: false, middle: false } };
+        let testRunning = false;
+
+        // HID USB Key Codes
+        const HID_KEYS = {
+            'a': 0x04, 'b': 0x05, 'c': 0x06, 'd': 0x07, 'e': 0x08, 'f': 0x09,
+            'g': 0x0A, 'h': 0x0B, 'i': 0x0C, 'j': 0x0D, 'k': 0x0E, 'l': 0x0F,
+            'm': 0x10, 'n': 0x11, 'o': 0x12, 'p': 0x13, 'q': 0x14, 'r': 0x15,
+            's': 0x16, 't': 0x17, 'u': 0x18, 'v': 0x19, 'w': 0x1A, 'x': 0x1B,
+            'y': 0x1C, 'z': 0x1D, '1': 0x1E, '2': 0x1F, '3': 0x20, '4': 0x21,
+            '5': 0x22, '6': 0x23, '7': 0x24, '8': 0x25, '9': 0x26, '0': 0x27,
+            ' ': 0x2C, '!': 0x1E, '@': 0x1F, '#': 0x20
+        };
+
+        // Logging
+        function log(message, type = 'info') {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logContainer').innerHTML = '';
+            log('Log cleared', 'info');
+        }
+
+        function exportLog() {
+            const logText = document.getElementById('logContainer').innerText;
+            const blob = new Blob([logText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `hid-test-log-${Date.now()}.txt`;
+            a.click();
+            log('Log exported', 'success');
+        }
+
+        function updateStats() {
+            document.getElementById('statMessages').textContent = stats.messages;
+            document.getElementById('statMouse').textContent = stats.mouse;
+            document.getElementById('statKeyboard').textContent = stats.keyboard;
+            document.getElementById('statConsumer').textContent = stats.consumer;
+        }
+
+        // WebSocket
+        function connectWS() {
+            const url = document.getElementById('wsUrl').value;
+            log(`Connecting to ${url}...`, 'info');
+
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                log('✅ WebSocket connected!', 'success');
+                document.getElementById('wsStatus').classList.add('connected');
+                document.getElementById('wsStatusText').textContent = 'Connected';
+                requestStatus();
+            };
+
+            ws.onclose = () => {
+                log('❌ WebSocket disconnected', 'error');
+                document.getElementById('wsStatus').classList.remove('connected');
+                document.getElementById('wsStatusText').textContent = 'Disconnected';
+                ws = null;
+            };
+
+            ws.onerror = (error) => {
+                log(`❌ WebSocket error: ${error}`, 'error');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleMessage(msg);
+                } catch (e) {
+                    log(`Parse error: ${e}`, 'error');
+                }
+            };
+        }
+
+        function disconnectWS() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function handleMessage(msg) {
+            log(`← Received: ${JSON.stringify(msg)}`, 'info');
+
+            if (msg.type === 'state') {
+                document.getElementById('bleState').textContent = msg.state;
+                document.getElementById('bondedState').textContent = msg.bonded ? 'Yes' : 'No';
+
+                if (msg.state === 'CONNECTED') {
+                    log('🎉 BLE device connected and ready!', 'success');
+                } else if (msg.state === 'ADVERTISING') {
+                    log('📢 Device is advertising, waiting for connection...', 'info');
+                }
+            } else if (msg.type === 'control_response') {
+                if (msg.ok) {
+                    log(`✅ Command '${msg.cmd}' successful`, 'success');
+                    if (msg.wifi) {
+                        document.getElementById('wifiMode').textContent =
+                            `${msg.wifi.mode} ${msg.wifi.ip || ''}`;
+                    }
+                } else {
+                    log(`❌ Command '${msg.cmd}' failed: ${msg.err}`, 'error');
+                }
+            }
+        }
+
+        function sendMessage(msg) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('❌ Not connected to WebSocket', 'error');
+                return false;
+            }
+            ws.send(JSON.stringify(msg));
+            stats.messages++;
+            updateStats();
+            return true;
+        }
+
+        function requestStatus() {
+            sendControl('wifi_get');
+        }
+
+        // Mouse Control
+        function sendMouse(dx, dy, wheel = 0) {
+            if (sendMessage({
+                type: 'mouse',
+                dx: dx,
+                dy: dy,
+                wheel: wheel,
+                buttons: mouseState.buttons
+            })) {
+                stats.mouse++;
+                updateStats();
+            }
+        }
+
+        function setMouseButton(button, pressed) {
+            mouseState.buttons[button] = pressed;
+            sendMouse(0, 0, 0);
+            log(`Mouse ${button} button ${pressed ? 'pressed' : 'released'}`, 'info');
+        }
+
+        function scrollWheel(delta) {
+            sendMouse(0, 0, delta);
+            log(`Scroll wheel: ${delta}`, 'info');
+        }
+
+        // Mouse pad interaction
+        const mousePad = document.getElementById('mousePad');
+        let lastPos = null;
+        let isDragging = false;
+
+        mousePad.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            lastPos = { x: e.clientX, y: e.clientY };
+        });
+
+        mousePad.addEventListener('mousemove', (e) => {
+            if (isDragging && lastPos) {
+                const dx = Math.round((e.clientX - lastPos.x) * 2);
+                const dy = Math.round((e.clientY - lastPos.y) * 2);
+                if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+                    sendMouse(
+                        Math.max(-127, Math.min(127, dx)),
+                        Math.max(-127, Math.min(127, dy))
+                    );
+                }
+                lastPos = { x: e.clientX, y: e.clientY };
+            }
+        });
+
+        mousePad.addEventListener('mouseup', () => {
+            isDragging = false;
+            lastPos = null;
+        });
+
+        mousePad.addEventListener('mouseleave', () => {
+            isDragging = false;
+            lastPos = null;
+        });
+
+        // Touch support
+        mousePad.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            isDragging = true;
+            lastPos = { x: touch.clientX, y: touch.clientY };
+        });
+
+        mousePad.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (isDragging && lastPos) {
+                const touch = e.touches[0];
+                const dx = Math.round((touch.clientX - lastPos.x) * 2);
+                const dy = Math.round((touch.clientY - lastPos.y) * 2);
+                if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+                    sendMouse(
+                        Math.max(-127, Math.min(127, dx)),
+                        Math.max(-127, Math.min(127, dy))
+                    );
+                }
+                lastPos = { x: touch.clientX, y: touch.clientY };
+            }
+        });
+
+        mousePad.addEventListener('touchend', () => {
+            isDragging = false;
+            lastPos = null;
+        });
+
+        // Keyboard Control
+        function sendKeyboard(keys = [], modifiers = 0) {
+            if (sendMessage({
+                type: 'keyboard',
+                keys: keys,
+                modifiers: {
+                    left_control: !!(modifiers & 0x01),
+                    left_shift: !!(modifiers & 0x02),
+                    left_alt: !!(modifiers & 0x04),
+                    left_gui: !!(modifiers & 0x08),
+                    right_control: !!(modifiers & 0x10),
+                    right_shift: !!(modifiers & 0x20),
+                    right_alt: !!(modifiers & 0x40),
+                    right_gui: !!(modifiers & 0x80)
+                }
+            })) {
+                stats.keyboard++;
+                updateStats();
+            }
+        }
+
+        function pressKey(keycode, modifiers = 0) {
+            sendKeyboard([keycode], modifiers);
+            setTimeout(() => sendKeyboard([]), 50);
+            log(`Key pressed: 0x${keycode.toString(16)}`, 'info');
+        }
+
+        function typeText() {
+            const text = document.getElementById('textToType').value.toLowerCase();
+            let delay = 0;
+
+            for (let char of text) {
+                if (HID_KEYS[char]) {
+                    const needsShift = '!@#$%^&*()'.includes(char);
+                    setTimeout(() => {
+                        sendKeyboard([HID_KEYS[char]], needsShift ? 0x02 : 0);
+                        setTimeout(() => sendKeyboard([]), 50);
+                    }, delay);
+                    delay += 100;
+                }
+            }
+
+            log(`Typing: "${text}"`, 'info');
+        }
+
+        // Consumer Control
+        function sendConsumer(usage, hold = false) {
+            if (sendMessage({
+                type: 'consumer',
+                usage: usage,
+                pressed: true,
+                hold: hold
+            })) {
+                stats.consumer++;
+                updateStats();
+            }
+
+            if (!hold) {
+                setTimeout(() => {
+                    sendMessage({
+                        type: 'consumer',
+                        usage: 0,
+                        pressed: false,
+                        hold: false
+                    });
+                }, 100);
+            }
+
+            log(`Consumer control: 0x${usage.toString(16)}`, 'info');
+        }
+
+        // Device Control
+        function sendControl(cmd, params = {}) {
+            const msg = { type: 'control', cmd: cmd, ...params };
+            sendMessage(msg);
+            log(`→ Control command: ${cmd}`, 'info');
+        }
+
+        function configureWifi() {
+            const ssid = document.getElementById('wifiSsid').value;
+            const pass = document.getElementById('wifiPass').value;
+
+            if (!ssid) {
+                log('❌ Please enter SSID', 'error');
+                return;
+            }
+
+            sendControl('wifi_set', { ssid: ssid, psk: pass, apply: true });
+            log(`Configuring WiFi: ${ssid}`, 'info');
+        }
+
+        // Automated Tests
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function testMouseCircle() {
+            log('🧪 Testing: Mouse circle motion', 'info');
+            const steps = 36;
+            const radius = 30;
+
+            for (let i = 0; i < steps && testRunning; i++) {
+                const angle = (i / steps) * 2 * Math.PI;
+                const dx = Math.round(Math.cos(angle) * radius);
+                const dy = Math.round(Math.sin(angle) * radius);
+                sendMouse(dx, dy);
+                await sleep(50);
+            }
+
+            log('✅ Mouse circle test complete', 'success');
+        }
+
+        async function testMouseClick() {
+            log('🧪 Testing: Click sequence', 'info');
+
+            const clicks = ['left', 'right', 'middle', 'left'];
+            for (let button of clicks) {
+                setMouseButton(button, true);
+                await sleep(200);
+                setMouseButton(button, false);
+                await sleep(300);
+            }
+
+            log('✅ Click sequence test complete', 'success');
+        }
+
+        async function testKeyboardSequence() {
+            log('🧪 Testing: Keyboard sequence', 'info');
+
+            const keys = [0x04, 0x05, 0x06, 0x2C, 0x1E, 0x1F, 0x20]; // abc 123
+            for (let key of keys) {
+                pressKey(key);
+                await sleep(150);
+            }
+
+            log('✅ Keyboard sequence test complete', 'success');
+        }
+
+        async function testMediaSequence() {
+            log('🧪 Testing: Media controls', 'info');
+
+            const controls = [0xCD, 0xE9, 0xEA, 0xB5, 0xB6]; // Play, Vol+, Vol-, Next, Prev
+            for (let ctrl of controls) {
+                sendConsumer(ctrl);
+                await sleep(500);
+            }
+
+            log('✅ Media controls test complete', 'success');
+        }
+
+        async function runBondingTest() {
+            testRunning = true;
+            document.getElementById('testProgress').textContent = 'Running bonding test...';
+            log('🧪 Starting bonding test', 'info');
+
+            // Clear existing bonds
+            sendControl('forget');
+            await sleep(2000);
+
+            // Start advertising
+            sendControl('force_adv');
+            await sleep(1000);
+
+            log('✅ Bonding test setup complete. Please pair from your device.', 'success');
+            document.getElementById('testProgress').textContent = 'Waiting for pairing...';
+
+            testRunning = false;
+        }
+
+        async function runReconnectTest() {
+            testRunning = true;
+            document.getElementById('testProgress').textContent = 'Running reconnect test...';
+            log('🧪 Starting reconnect test', 'info');
+
+            // Stop advertising
+            sendControl('quiet');
+            await sleep(2000);
+
+            // Start advertising again
+            sendControl('force_adv');
+            await sleep(1000);
+
+            log('✅ Reconnect test complete', 'success');
+            document.getElementById('testProgress').textContent = '';
+            testRunning = false;
+        }
+
+        async function runFullTest() {
+            testRunning = true;
+            document.getElementById('testProgress').textContent = 'Running full test suite...';
+            log('🧪 Starting full test suite', 'info');
+
+            await testMouseCircle();
+            await sleep(500);
+
+            await testMouseClick();
+            await sleep(500);
+
+            await testKeyboardSequence();
+            await sleep(500);
+
+            await testMediaSequence();
+
+            log('🎉 Full test suite complete!', 'success');
+            document.getElementById('testProgress').textContent = 'All tests passed!';
+
+            setTimeout(() => {
+                document.getElementById('testProgress').textContent = '';
+            }, 3000);
+
+            testRunning = false;
+        }
+
+        function stopTests() {
+            testRunning = false;
+            document.getElementById('testProgress').textContent = 'Tests stopped';
+            log('⏹️ Tests stopped by user', 'info');
+        }
+
+        // Initialize
+        window.addEventListener('load', () => {
+            log('🚀 Test interface ready', 'success');
+            log('📝 Instructions: 1) Connect WebSocket, 2) Pair BLE device, 3) Run tests', 'info');
+        });
+    </script>
+</body>
+
+</html>

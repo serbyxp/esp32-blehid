@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "wifi_manager.h": "c",
+        "string.h": "c",
+        "ble_hid.h": "c"
+    },
+    "idf.portWin": "COM3",
+    "idf.flashType": "UART"
+}

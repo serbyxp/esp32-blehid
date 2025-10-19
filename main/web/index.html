@@ -1,0 +1,1280 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 HID Controller</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h2 {
+            color: #667eea;
+            margin-bottom: 16px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 8px;
+        }
+
+        .status-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            padding: 16px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .status-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .status-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .status-indicator.connected {
+            background: #44ff44;
+            box-shadow: 0 0 10px rgba(68, 255, 68, 0.7);
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.disconnected {
+            background: #ff4444;
+        }
+
+        .status-indicator.connecting {
+            background: #ffaa00;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.6;
+            }
+        }
+
+        @keyframes blink {
+
+            0%,
+            50%,
+            100% {
+                opacity: 1;
+            }
+
+            25%,
+            75% {
+                opacity: 0.3;
+            }
+        }
+
+        .url-box {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+            margin: 12px 0;
+        }
+
+        .url-box strong {
+            display: block;
+            margin-bottom: 8px;
+            color: #667eea;
+        }
+
+        .url-link {
+            color: #667eea;
+            text-decoration: none;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .url-link:hover {
+            text-decoration: underline;
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+        }
+
+        button.danger {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+
+        button.success {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+        }
+
+        .wifi-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin: 12px 0;
+        }
+
+        .wifi-item {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .wifi-item:hover {
+            background: #f8f9fa;
+        }
+
+        .wifi-item.selected {
+            background: #e3f2fd;
+            border-left: 4px solid #667eea;
+        }
+
+        .wifi-signal {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .info-item {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .info-label {
+            display: block;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: #666;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .info-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: #333;
+            word-break: break-all;
+        }
+
+        .status-chip {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .status-chip.chip-on {
+            background: #d1fbd1;
+            color: #1b5e20;
+        }
+
+        .status-chip.chip-off {
+            background: #fde0dc;
+            color: #b71c1c;
+        }
+
+        .scan-status {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #555;
+        }
+
+        .signal-strength {
+            font-size: 20px;
+        }
+
+        .mouse-pad {
+            width: 100%;
+            height: 300px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            cursor: crosshair;
+            position: relative;
+            touch-action: none;
+        }
+
+        .mouse-pad::before {
+            content: 'Drag to move mouse';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #999;
+            font-size: 18px;
+            pointer-events: none;
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .test-button {
+            padding: 20px;
+            text-align: center;
+            background: #f8f9fa;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid #e0e0e0;
+        }
+
+        .test-button:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+            transform: scale(1.05);
+        }
+
+        .log-container {
+            max-height: 250px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Monaco', monospace;
+            font-size: 12px;
+            color: #d4d4d4;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+            padding: 4px 8px;
+            border-left: 3px solid #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            background: rgba(231, 76, 60, 0.1);
+            color: #ff6b6b;
+        }
+
+        .log-entry.success {
+            border-left-color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+            color: #51cf66;
+        }
+
+        .keyboard-key {
+            display: inline-block;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+            margin: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .keyboard-key:active {
+            background: #667eea;
+            color: white;
+            transform: translateY(2px);
+        }
+
+        textarea {
+            font-family: monospace;
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>ðŸ–±ï¸ <span id="deviceTitle">ESP32 HID</span></h1>
+
+        <!-- Status Bar -->
+        <div class="card">
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-label">WebSocket</span>
+                    <span class="status-value">
+                        <span class="status-indicator disconnected" id="wsIndicator"></span>
+                        <span id="wsStatus">Disconnected</span>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">BLE State</span>
+                    <span class="status-value" id="bleState">Unknown</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">WiFi Mode</span>
+                    <span class="status-value" id="wifiMode">Unknown</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">IP Address</span>
+                    <span class="status-value" id="ipAddress">-</span>
+                </div>
+            </div>
+
+            <div class="url-box" id="urlBox" style="display:none;">
+                <strong>Access URLs:</strong>
+                <div>Hostname: <a href="#" class="url-link" id="hostnameUrl" target="_blank">-</a></div>
+                <div>IP Address: <a href="#" class="url-link" id="ipUrl" target="_blank">-</a></div>
+            </div>
+        </div>
+
+        <!-- Device Info -->
+        <div class="card">
+            <h2>ðŸ“Ÿ Device Info</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Hostname</span>
+                    <span class="info-value" id="infoHostname">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">IP Address</span>
+                    <span class="info-value" id="infoIp">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">AP MAC</span>
+                    <span class="info-value" id="infoApMac">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">STA MAC</span>
+                    <span class="info-value" id="infoStaMac">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">BLE Connection</span>
+                    <span class="info-value"><span class="status-chip chip-off" id="bleStatusChip">Not
+                            Connected</span></span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">BLE Peer Address</span>
+                    <span class="info-value" id="blePeerAddress">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">BLE Security</span>
+                    <span class="info-value" id="bleSecurity">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- WiFi Configuration -->
+        <div class="card">
+            <h2>ðŸ“¡ WiFi Configuration</h2>
+
+            <div class="input-group">
+                <label>Available Networks <button onclick="scanWifi()" id="scanBtn" class="secondary">ðŸ”
+                        Scan</button></label>
+                <div class="wifi-list" id="wifiList" style="display:none;"></div>
+                <div id="scanStatus" class="scan-status">Ready to scan for Wi-Fi networks.</div>
+            </div>
+
+            <div class="input-group">
+                <label for="wifiSsid">Network SSID</label>
+                <input type="text" id="wifiSsid" placeholder="WiFi network name">
+            </div>
+            <div class="input-group">
+                <label for="wifiPass">Password</label>
+                <input type="password" id="wifiPass" placeholder="WiFi password">
+            </div>
+            <button onclick="connectToWifi()" class="success">Connect to WiFi</button>
+            <button onclick="clearWifiConfig()" class="danger">Clear Saved WiFi</button>
+        </div>
+
+        <!-- Mouse Control -->
+        <div class="card">
+            <h2>ðŸ–±ï¸ Mouse Control</h2>
+            <div class="mouse-pad" id="mousePad"></div>
+            <div class="button-grid">
+                <button onmousedown="setMouseButton('left', true)" onmouseup="setMouseButton('left', false)">Left
+                    Click</button>
+                <button onmousedown="setMouseButton('middle', true)" onmouseup="setMouseButton('middle', false)">Middle
+                    Click</button>
+                <button onmousedown="setMouseButton('right', true)" onmouseup="setMouseButton('right', false)">Right
+                    Click</button>
+            </div>
+            <div style="margin-top: 12px;">
+                <button onclick="scrollWheel(1)">â†‘ Scroll Up</button>
+                <button onclick="scrollWheel(-1)">â†“ Scroll Down</button>
+            </div>
+        </div>
+
+        <!-- Keyboard Control -->
+        <div class="card">
+            <h2>âŒ¨ï¸ Keyboard Control</h2>
+            <div class="input-group">
+                <label for="textToType">Text to Type</label>
+                <textarea id="textToType" placeholder="Enter text...">Hello from ESP32!</textarea>
+            </div>
+            <button onclick="typeText()" class="success">Type Text</button>
+            <button onclick="pressKey(0x28)">Enter</button>
+            <button onclick="pressKey(0x2C)">Space</button>
+            <button onclick="pressKey(0x2A)">Backspace</button>
+
+            <div style="margin-top: 12px;">
+                <span class="keyboard-key" onclick="pressKey('A')">A</span>
+                <span class="keyboard-key" onclick="pressKey('B')">B</span>
+                <span class="keyboard-key" onclick="pressKey('C')">C</span>
+                <span class="keyboard-key" onclick="pressKey('1')">1</span>
+                <span class="keyboard-key" onclick="pressKey('2')">2</span>
+                <span class="keyboard-key" onclick="pressKey('3')">3</span>
+            </div>
+        </div>
+
+        <!-- Media Controls -->
+        <div class="card">
+            <h2>ðŸŽµ Media Controls</h2>
+            <div class="test-grid">
+                <div class="test-button" onclick="sendConsumer(0xE9)">ðŸ”Š Vol+</div>
+                <div class="test-button" onclick="sendConsumer(0xEA)">ðŸ”‰ Vol-</div>
+                <div class="test-button" onclick="sendConsumer(0xE2)">ðŸ”‡ Mute</div>
+                <div class="test-button" onclick="sendConsumer(0xCD)">â–¶ï¸ Play</div>
+                <div class="test-button" onclick="sendConsumer(0xB5)">â­ï¸ Next</div>
+                <div class="test-button" onclick="sendConsumer(0xB6)">â®ï¸ Prev</div>
+            </div>
+        </div>
+
+        <!-- Device Control -->
+        <div class="card">
+            <h2>ðŸŽ›ï¸ Device Control</h2>
+            <button onclick="sendControl('force_adv')" class="success">Start Advertising</button>
+            <button onclick="sendControl('quiet')" class="secondary">Stop Advertising</button>
+            <button onclick="sendControl('forget')" class="danger">Clear Bonding</button>
+        </div>
+
+        <!-- Log -->
+        <div class="card">
+            <h2>ðŸ“ Log</h2>
+            <div class="log-container" id="logContainer"></div>
+            <button onclick="clearLog()" class="secondary" style="margin-top: 12px;">Clear Log</button>
+        </div>
+    </div>
+
+    <script>
+        const WS_PORT = 8765;
+        const AUTH_MODES = {
+            0: 'Open',
+            1: 'WEP',
+            2: 'WPA-PSK',
+            3: 'WPA2-PSK',
+            4: 'WPA/WPA2',
+            5: 'WPA2-Ent',
+            6: 'WPA3-PSK',
+            7: 'WPA2/WPA3'
+        };
+
+        let ws = null;
+        let reconnectTimer = null;
+        let statusPollTimer = null;
+        let mouseButtons = { left: false, right: false, middle: false };
+        let pointerActive = false;
+        let lastPointer = { x: 0, y: 0 };
+        let selectedWifiItem = null;
+        let lastBleStatus = {
+            connected: false,
+            bonded: false,
+            encrypted: false,
+            authenticated: false,
+            peer_addr: 'n/a',
+            addr_type: 0
+        };
+
+        function markFieldDirty(event) {
+            event.target.dataset.userEdited = '1';
+        }
+
+        function resetFieldDirty(field) {
+            if (field) {
+                delete field.dataset.userEdited;
+            }
+        }
+
+        function setScanStatus(message) {
+            const label = document.getElementById('scanStatus');
+            if (label) {
+                label.textContent = message;
+            }
+        }
+
+        function updateBleStatus(data = {}) {
+            lastBleStatus = Object.assign({}, lastBleStatus, data);
+
+            const chip = document.getElementById('bleStatusChip');
+            if (!chip) {
+                return;
+            }
+
+            const connected = !!lastBleStatus.connected;
+            chip.textContent = connected ? 'Connected' : 'Not Connected';
+            chip.className = `status-chip ${connected ? 'chip-on' : 'chip-off'}`;
+
+            const peerAddrEl = document.getElementById('blePeerAddress');
+            if (peerAddrEl) {
+                const addr = connected && lastBleStatus.peer_addr && lastBleStatus.peer_addr.toLowerCase() !== 'n/a'
+                    ? lastBleStatus.peer_addr
+                    : 'n/a';
+                peerAddrEl.textContent = addr;
+            }
+
+            const securityEl = document.getElementById('bleSecurity');
+            if (securityEl) {
+                if (!connected) {
+                    securityEl.textContent = 'n/a';
+                } else {
+                    const flags = [];
+                    flags.push(lastBleStatus.bonded ? 'Bonded' : 'Not Bonded');
+                    flags.push(lastBleStatus.encrypted ? 'Encrypted' : 'Not Encrypted');
+                    if (lastBleStatus.authenticated) {
+                        flags.push('Authenticated');
+                    }
+                    securityEl.textContent = flags.join(' • ');
+                }
+            }
+        }
+
+        function log(message, type = 'info') {
+            const container = document.getElementById('logContainer');
+            if (!container) {
+                return;
+            }
+
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+
+            while (container.children.length > 100) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        function clearLog() {
+            const container = document.getElementById('logContainer');
+            if (container) {
+                container.innerHTML = '';
+            }
+        }
+
+        function setScanningState(active) {
+            const button = document.getElementById('scanBtn');
+            if (!button) {
+                return;
+            }
+
+            if (active) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner"></span> Scanning...';
+                setScanStatus('Scanning for nearby networks...');
+            } else {
+                button.disabled = false;
+                button.textContent = 'ðŸ” Scan';
+            }
+        }
+
+        function connectWS() {
+            clearTimeout(reconnectTimer);
+
+            const hostname = window.location.hostname || '192.168.4.1';
+            const wsUrl = `ws://${hostname}:${WS_PORT}/ws`;
+
+            log(`Connecting to ${wsUrl}...`);
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('WebSocket connected', 'success');
+                document.getElementById('wsIndicator').className = 'status-indicator connected';
+                document.getElementById('wsStatus').textContent = 'Connected';
+
+                if (statusPollTimer) {
+                    clearInterval(statusPollTimer);
+                }
+
+                getStatus();
+                statusPollTimer = setInterval(getStatus, 5000);
+            };
+
+            ws.onclose = () => {
+                log('WebSocket disconnected', 'error');
+                document.getElementById('wsIndicator').className = 'status-indicator disconnected';
+                document.getElementById('wsStatus').textContent = 'Disconnected';
+                ws = null;
+
+                if (statusPollTimer) {
+                    clearInterval(statusPollTimer);
+                    statusPollTimer = null;
+                }
+
+                reconnectTimer = setTimeout(connectWS, 3000);
+            };
+
+            ws.onerror = () => {
+                log('WebSocket error', 'error');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleMessage(msg);
+                } catch (err) {
+                    log(`Parse error: ${err}`, 'error');
+                }
+            };
+        }
+
+        function handleMessage(msg) {
+            if (!msg || !msg.type) {
+                return;
+            }
+
+            if (msg.type === 'state') {
+                document.getElementById('bleState').textContent = msg.state || 'Unknown';
+                if (msg.state === 'CONNECTED') {
+                    log('BLE device connected', 'success');
+                }
+                const stateUpdate = { connected: msg.state === 'CONNECTED' };
+                if (typeof msg.bonded === 'boolean') {
+                    stateUpdate.bonded = msg.bonded;
+                }
+                updateBleStatus(stateUpdate);
+            } else if (msg.type === 'control_response') {
+                if (msg.ok) {
+                    log(`Command '${msg.cmd}' successful`, 'success');
+                    if (msg.cmd === 'wifi_get' && msg.wifi) {
+                        updateWifiStatus(msg.wifi);
+                    } else if ((msg.cmd === 'wifi_set' || msg.cmd === 'wifi_clear') && msg.ok) {
+                        getStatus();
+                    }
+                } else {
+                    log(`Command '${msg.cmd}' failed: ${msg.err || 'error'}`, 'error');
+                    if (msg.cmd === 'wifi_scan') {
+                        setScanningState(false);
+                        setScanStatus(`Scan failed: ${msg.err || 'Unknown error'}`);
+                    }
+                }
+            } else if (msg.type === 'scan_results') {
+                displayScanResults(Array.isArray(msg.networks) ? msg.networks : []);
+            } else if (msg.type === 'wifi_status') {
+                updateWifiStatus(msg);
+            } else if (msg.type === 'ble_status') {
+                const { type, ...rest } = msg;
+                updateBleStatus(rest);
+            }
+        }
+
+        function sendMessage(payload) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WebSocket not connected', 'error');
+                return false;
+            }
+            ws.send(JSON.stringify(payload));
+            return true;
+        }
+
+        function sendControl(cmd, extra = {}) {
+            return sendMessage({ type: 'control', cmd, ...extra });
+        }
+
+        function getStatus() {
+            sendControl('wifi_get');
+        }
+
+        async function fetchHttpStatus() {
+            try {
+                const response = await fetch('/api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cmd: 'get_status' })
+                });
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const data = await response.json();
+                if (data && data.ok) {
+                    updateWifiStatus(data);
+                }
+            } catch (err) {
+                log(`Status fetch failed: ${err}`, 'error');
+            }
+        }
+
+        function updateWifiStatus(status) {
+            if (!status) {
+                return;
+            }
+
+            const hostname = status.hostname || 'ESP32 HID';
+            const mode = (status.mode || 'unknown').toUpperCase();
+            const ip = status.ip || '-';
+            const connected = !!status.connected;
+
+            document.getElementById('deviceTitle').textContent = hostname.toUpperCase();
+            document.getElementById('wifiMode').textContent = mode;
+            document.getElementById('ipAddress').textContent = ip;
+
+            const hostDisplay = document.getElementById('infoHostname');
+            if (hostDisplay) {
+                hostDisplay.textContent = `${hostname}.local`;
+            }
+
+            const ipDisplay = document.getElementById('infoIp');
+            if (ipDisplay) {
+                ipDisplay.textContent = ip;
+            }
+
+            const apMacDisplay = document.getElementById('infoApMac');
+            if (apMacDisplay) {
+                apMacDisplay.textContent = status.mac_ap || 'N/A';
+            }
+
+            const staMacDisplay = document.getElementById('infoStaMac');
+            if (staMacDisplay) {
+                staMacDisplay.textContent = status.mac_sta || 'N/A';
+            }
+
+            const urlBox = document.getElementById('urlBox');
+            const hostnameUrl = document.getElementById('hostnameUrl');
+            const ipUrl = document.getElementById('ipUrl');
+
+            if ((hostname && hostname !== '') || (ip && ip !== '-')) {
+                urlBox.style.display = 'block';
+                if (hostnameUrl) {
+                    hostnameUrl.textContent = `${hostname}.local`;
+                    hostnameUrl.href = `http://${hostname}.local/`;
+                }
+                if (ipUrl) {
+                    ipUrl.textContent = ip;
+                    ipUrl.href = `http://${ip}/`;
+                }
+            } else {
+                urlBox.style.display = 'none';
+            }
+
+            setScanningState(!!status.scanning);
+
+            const ssidField = document.getElementById('wifiSsid');
+            const passField = document.getElementById('wifiPass');
+
+            if (status.creds && ssidField) {
+                if (!ssidField.dataset.userEdited) {
+                    ssidField.value = status.creds.ssid || '';
+                    delete ssidField.dataset.userEdited;
+                }
+            }
+
+            if (passField) {
+                const hasStoredPsk = !!(status.creds && status.creds.has_psk);
+                passField.placeholder = hasStoredPsk ? 'Saved password (leave blank to keep)' : 'WiFi password';
+
+                if (!passField.dataset.userEdited) {
+                    if (!hasStoredPsk) {
+                        passField.value = '';
+                    }
+                    else if (!passField.value) {
+                        passField.value = '';
+                    }
+                    if (passField.dataset.userEdited && !passField.value) {
+                        delete passField.dataset.userEdited;
+                    }
+                }
+            }
+
+            const indicator = document.getElementById('wsIndicator');
+            if (connected && indicator.classList.contains('disconnected')) {
+                indicator.className = 'status-indicator connected';
+            }
+        }
+
+        function displayScanResults(networks) {
+            setScanningState(false);
+
+            const list = document.getElementById('wifiList');
+            if (!list) {
+                return;
+            }
+
+            list.innerHTML = '';
+            selectedWifiItem = null;
+
+            setScanStatus(networks.length ? `Found ${networks.length} network${networks.length === 1 ? '' : 's'}.` : 'No networks found. Try scanning again.');
+
+            if (!networks.length) {
+                const empty = document.createElement('div');
+                empty.className = 'wifi-item';
+                empty.textContent = 'No networks found.';
+                list.appendChild(empty);
+                list.style.display = 'block';
+                return;
+            }
+
+            const ssidField = document.getElementById('wifiSsid');
+            const passField = document.getElementById('wifiPass');
+
+            networks
+                .slice()
+                .sort((a, b) => (b.rssi ?? -100) - (a.rssi ?? -100))
+                .forEach((network) => {
+                    const option = document.createElement('label');
+                    option.className = 'wifi-item';
+
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = 'wifiNetwork';
+                    radio.value = network.ssid || '';
+                    radio.style.marginRight = '12px';
+
+                    const info = document.createElement('div');
+                    info.innerHTML = `<strong>${network.ssid || '(hidden)'}</strong><br><small>${AUTH_MODES[network.auth] || 'Unknown'} • ${network.rssi} dBm</small>`;
+
+                    const signal = document.createElement('div');
+                    signal.className = 'wifi-signal';
+                    signal.innerHTML = `<span class="signal-strength">ðŸ“¶</span>${network.channel}`;
+
+                    const content = document.createElement('div');
+                    content.style.display = 'flex';
+                    content.style.justifyContent = 'space-between';
+                    content.style.alignItems = 'center';
+                    content.style.width = '100%';
+                    content.appendChild(info);
+                    content.appendChild(signal);
+
+                    radio.addEventListener('change', () => {
+                        if (!radio.checked) {
+                            return;
+                        }
+
+                        if (selectedWifiItem) {
+                            selectedWifiItem.classList.remove('selected');
+                        }
+                        selectedWifiItem = option;
+                        option.classList.add('selected');
+
+                        if (ssidField) {
+                            ssidField.value = network.ssid || '';
+                            ssidField.dataset.userEdited = '1';
+                        }
+                        if (passField) {
+                            passField.focus();
+                        }
+                    });
+
+                    option.appendChild(radio);
+                    option.appendChild(content);
+                    list.appendChild(option);
+
+                    if (ssidField && ssidField.value && ssidField.value === network.ssid) {
+                        radio.checked = true;
+                        radio.dispatchEvent(new Event('change'));
+                    }
+                });
+
+            list.style.display = 'block';
+        }
+
+        function scanWifi() {
+            if (sendControl('wifi_scan')) {
+                log('WiFi scan requested...');
+                setScanningState(true);
+            }
+        }
+
+        function connectToWifi() {
+            const ssidField = document.getElementById('wifiSsid');
+            const passField = document.getElementById('wifiPass');
+
+            if (!ssidField || !passField) {
+                return;
+            }
+
+            const ssid = ssidField.value.trim();
+            const password = passField.value;
+
+            if (!ssid) {
+                log('Please enter an SSID.', 'error');
+                ssidField.focus();
+                return;
+            }
+
+            if (sendControl('wifi_set', { ssid, psk: password })) {
+                log(`Connecting to '${ssid}'...`);
+                resetFieldDirty(ssidField);
+                resetFieldDirty(passField);
+            }
+        }
+
+        function clearWifiConfig() {
+            if (sendControl('wifi_clear')) {
+                log('Clearing stored WiFi configuration...');
+                const ssidField = document.getElementById('wifiSsid');
+                const passField = document.getElementById('wifiPass');
+                if (ssidField) {
+                    ssidField.value = '';
+                    resetFieldDirty(ssidField);
+                }
+                if (passField) {
+                    passField.value = '';
+                    resetFieldDirty(passField);
+                }
+            }
+        }
+
+        function setMouseButton(button, pressed) {
+            if (!(button in mouseButtons)) {
+                return;
+            }
+            mouseButtons[button] = pressed;
+            sendMouseUpdate(0, 0, 0);
+        }
+
+        function sendMouseUpdate(dx = 0, dy = 0, wheel = 0) {
+            const clamp = (value) => {
+                if (value > 127) return 127;
+                if (value < -127) return -127;
+                return value;
+            };
+
+            sendMessage({
+                type: 'mouse',
+                dx: clamp(dx),
+                dy: clamp(dy),
+                wheel: clamp(wheel),
+                buttons: {
+                    left: mouseButtons.left,
+                    right: mouseButtons.right,
+                    middle: mouseButtons.middle
+                }
+            });
+        }
+
+        function scrollWheel(direction) {
+            if (!direction) {
+                return;
+            }
+            const step = direction > 0 ? 1 : -1;
+            sendMouseUpdate(0, 0, step);
+        }
+
+        function initMousePad() {
+            const pad = document.getElementById('mousePad');
+            if (!pad) {
+                return;
+            }
+
+            pad.addEventListener('contextmenu', (event) => event.preventDefault());
+
+            pad.addEventListener('pointerdown', (event) => {
+                if (event.button !== 0) {
+                    return;
+                }
+                pointerActive = true;
+                lastPointer = { x: event.clientX, y: event.clientY };
+                pad.setPointerCapture(event.pointerId);
+                mouseButtons.left = true;
+                sendMouseUpdate(0, 0, 0);
+                event.preventDefault();
+            });
+
+            pad.addEventListener('pointermove', (event) => {
+                if (!pointerActive) {
+                    return;
+                }
+
+                const rawDx = (typeof event.movementX === 'number') ? event.movementX
+                    : (event.clientX - lastPointer.x);
+                const rawDy = (typeof event.movementY === 'number') ? event.movementY
+                    : (event.clientY - lastPointer.y);
+
+                const dx = Math.round(rawDx * 0.8);
+                const dy = Math.round(rawDy * 0.8);
+
+                lastPointer = { x: event.clientX, y: event.clientY };
+
+                if (dx !== 0 || dy !== 0) {
+                    sendMouseUpdate(dx, dy, 0);
+                }
+
+                event.preventDefault();
+            });
+
+            const releasePointer = (event) => {
+                pointerActive = false;
+                try {
+                    pad.releasePointerCapture(event.pointerId);
+                } catch (_) {
+                    /* ignore */
+                }
+                if (event.type === 'pointerup' && event.button === 0) {
+                    mouseButtons.left = false;
+                }
+                if (event.type === 'pointerleave' || event.type === 'pointercancel') {
+                    mouseButtons.left = false;
+                }
+                sendMouseUpdate(0, 0, 0);
+                event.preventDefault();
+            };
+
+            pad.addEventListener('pointerup', releasePointer);
+            pad.addEventListener('pointerleave', releasePointer);
+            pad.addEventListener('pointercancel', releasePointer);
+
+            pad.addEventListener('wheel', (event) => {
+                event.preventDefault();
+                const direction = event.deltaY < 0 ? 1 : -1;
+                scrollWheel(direction);
+            }, { passive: false });
+        }
+
+        function pressKey(key) {
+            if (typeof key === 'string' && key.length > 0) {
+                sendKeyboardAscii(key[0]);
+                return;
+            }
+            if (Number.isInteger(key)) {
+                sendKeyboardSpecial(key);
+            }
+        }
+
+        function sendKeyboardSpecial(code, modifiers = {}) {
+            if (!Number.isInteger(code)) {
+                return;
+            }
+
+            const payload = { type: 'keyboard', keys: [code] };
+            if (modifiers && Object.keys(modifiers).length > 0) {
+                payload.modifiers = modifiers;
+            }
+
+            sendMessage(payload);
+            setTimeout(() => {
+                sendMessage({ type: 'keyboard', keys: [], modifiers: {} });
+            }, 40);
+        }
+
+        function sendKeyboardAscii(ch) {
+            if (!ch) {
+                return;
+            }
+
+            const codePoint = ch.codePointAt(0);
+            if (!Number.isInteger(codePoint)) {
+                return;
+            }
+
+            sendMessage({ type: 'keyboard', ascii: codePoint });
+        }
+
+        function sendKeyboardText(text) {
+            if (!text) {
+                return;
+            }
+            sendMessage({ type: 'keyboard', text });
+        }
+
+        async function typeText() {
+            const textarea = document.getElementById('textToType');
+            if (!textarea) {
+                return;
+            }
+
+            const text = textarea.value || '';
+            if (!text) {
+                return;
+            }
+
+            sendKeyboardText(text);
+        }
+
+        function sendConsumer(usage) {
+            if (!Number.isInteger(usage)) {
+                return;
+            }
+
+            if (sendMessage({ type: 'consumer', usage, pressed: true })) {
+                setTimeout(() => {
+                    sendMessage({ type: 'consumer', usage: 0, pressed: false });
+                }, 80);
+            }
+        }
+
+        window.addEventListener('load', () => {
+            const ssidField = document.getElementById('wifiSsid');
+            const passField = document.getElementById('wifiPass');
+
+            [ssidField, passField].forEach((field) => {
+                if (!field) {
+                    return;
+                }
+                field.addEventListener('input', markFieldDirty);
+                field.addEventListener('blur', () => {
+                    if (!field.value) {
+                        resetFieldDirty(field);
+                    }
+                });
+            });
+
+            initMousePad();
+            connectWS();
+            fetchHttpStatus();
+            updateBleStatus(lastBleStatus);
+            setScanStatus('Ready to scan for Wi-Fi networks.');
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (ws) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+
+</html>
