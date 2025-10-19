@@ -12,6 +12,8 @@ import time
 import serial
 import websocket
 
+from ascii_hid_table import HID_ASCII_TABLE, HID_KEYMAP_LEFT_SHIFT, HID_KEYMAP_SHIFT
+
 class HIDClient:
     """Base HID client interface"""
     
@@ -117,22 +119,6 @@ class WebSocketClient(HIDClient):
         self.ws.close()
 
 
-HID_KEYMAP_SHIFT = 0x80
-HID_KEYMAP_LEFT_SHIFT = 0x02
-
-# Fixed ASCII to HID keycode mapping copied from firmware
-ASCII_TO_HID = [
-    0, 0, 0, 0, 0, 0, 0, 0, 42, 43, 40, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    44, 158, 180, 160, 161, 162, 164, 52, 166, 167, 165, 174, 54, 45, 55, 56,
-    39, 30, 31, 32, 33, 34, 35, 36, 37, 38, 179, 51, 182, 46, 183, 184,
-    159, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146,
-    147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 47, 49, 48, 163, 173,
-    53, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-    19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 175, 177, 176, 181, 0,
-]
-
-
 def ascii_to_hid(char):
     """Convert a single character to HID keycode and modifiers."""
     if not char:
@@ -142,10 +128,10 @@ def ascii_to_hid(char):
     if ascii_code == 13:  # Carriage return uses the newline entry
         ascii_code = 10
 
-    if ascii_code >= len(ASCII_TO_HID):
+    if ascii_code >= len(HID_ASCII_TABLE):
         return None
 
-    entry = ASCII_TO_HID[ascii_code]
+    entry = HID_ASCII_TABLE[ascii_code]
     if entry == 0:
         return None
 
