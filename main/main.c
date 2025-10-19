@@ -231,6 +231,7 @@ static void on_mouse_input(const mouse_state_t *state)
     if (changed)
     {
         hid_device_set_mouse_state(g_device, &g_remote_state.mouse);
+        hid_device_request_notify(g_device, true, false, false);
     }
 }
 
@@ -256,6 +257,7 @@ static void on_keyboard_input(const keyboard_state_t *state)
     if (changed)
     {
         hid_device_set_keyboard_state(g_device, &g_remote_state.keyboard);
+        hid_device_request_notify(g_device, false, true, false);
     }
 }
 
@@ -277,11 +279,13 @@ static void on_consumer_input(const consumer_state_t *state)
         g_remote_state.consumer.usage = 0;
         g_remote_state.consumer.hold = false;
         hid_device_set_consumer_state(g_device, &g_remote_state.consumer);
+        hid_device_request_notify(g_device, false, false, true);
         return;
     }
 
     g_remote_state.consumer = normalized;
     hid_device_set_consumer_state(g_device, &g_remote_state.consumer);
+    hid_device_request_notify(g_device, false, false, true);
 }
 
 static void send_control_response(cJSON *response)
@@ -490,42 +494,32 @@ static void notify_timer_callback(TimerHandle_t timer)
 {
     hid_device_state_t state = hid_device_get_state(g_device);
 
-    if (state == DEVICE_STATE_CONNECTED)
+    if (state != DEVICE_STATE_CONNECTED)
     {
-        esp_err_t mouse_err = hid_device_notify_mouse(g_device);
-        if (mouse_err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to notify mouse report: %s", esp_err_to_name(mouse_err));
-        }
+        return;
+    }
 
-        esp_err_t keyboard_err = hid_device_notify_keyboard(g_device);
-        if (keyboard_err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to notify keyboard report: %s", esp_err_to_name(keyboard_err));
-        }
+    bool updated = false;
 
-        esp_err_t consumer_err = hid_device_notify_consumer(g_device);
-        if (consumer_err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to notify consumer report: %s", esp_err_to_name(consumer_err));
-        }
+    if (!g_remote_state.mouse_hold &&
+        (g_remote_state.mouse.x != 0 || g_remote_state.mouse.y != 0))
+    {
+        g_remote_state.mouse.x = 0;
+        g_remote_state.mouse.y = 0;
+        hid_device_set_mouse_state(g_device, &g_remote_state.mouse);
+        updated = true;
+    }
 
-        // Auto-clear mouse movement if not held
-        if (mouse_err == ESP_OK &&
-            !g_remote_state.mouse_hold &&
-            (g_remote_state.mouse.x != 0 || g_remote_state.mouse.y != 0))
-        {
-            g_remote_state.mouse.x = 0;
-            g_remote_state.mouse.y = 0;
-            hid_device_set_mouse_state(g_device, &g_remote_state.mouse);
-        }
+    if (!g_remote_state.wheel_hold && g_remote_state.mouse.wheel != 0)
+    {
+        g_remote_state.mouse.wheel = 0;
+        hid_device_set_mouse_state(g_device, &g_remote_state.mouse);
+        updated = true;
+    }
 
-        if (mouse_err == ESP_OK &&
-            !g_remote_state.wheel_hold && g_remote_state.mouse.wheel != 0)
-        {
-            g_remote_state.mouse.wheel = 0;
-            hid_device_set_mouse_state(g_device, &g_remote_state.mouse);
-        }
+    if (updated)
+    {
+        hid_device_request_notify(g_device, true, false, false);
     }
 }
 

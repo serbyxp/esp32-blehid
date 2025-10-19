@@ -1,6 +1,9 @@
 #include "hid_device.h"
 #include "ble_hid.h"
 #include "esp_log.h"
+#include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -15,6 +18,7 @@ struct hid_device_s
 };
 
 static void internal_state_callback(hid_device_state_t state);
+static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyboard, bool consumer);
 static hid_device_t *g_device = NULL;
 
 hid_device_t *hid_device_create(const char *device_name)
@@ -150,6 +154,7 @@ void hid_device_set_mouse_state(hid_device_t *device, const mouse_state_t *state
     {
         device->state.mouse = *state;
         device->state.mouse_updated = true;
+        hid_device_flush_reports(device, true, false, false);
     }
 }
 
@@ -159,6 +164,7 @@ void hid_device_set_keyboard_state(hid_device_t *device, const keyboard_state_t 
     {
         device->state.keyboard = *state;
         device->state.keyboard_updated = true;
+        hid_device_flush_reports(device, false, true, false);
     }
 }
 
@@ -172,7 +178,13 @@ void hid_device_set_consumer_state(hid_device_t *device, const consumer_state_t 
         {
             device->state.consumer_pending_release = false;
         }
+        hid_device_flush_reports(device, false, false, true);
     }
+}
+
+void hid_device_request_notify(hid_device_t *device, bool mouse, bool keyboard, bool consumer)
+{
+    hid_device_flush_reports(device, mouse, keyboard, consumer);
 }
 
 esp_err_t hid_device_notify_mouse(hid_device_t *device)
@@ -300,9 +312,61 @@ static void internal_state_callback(hid_device_state_t state)
     if (g_device)
     {
         g_device->ble_state = state;
+        if (state == DEVICE_STATE_CONNECTED)
+        {
+            hid_device_flush_reports(g_device, true, true, true);
+        }
         if (g_device->callback)
         {
             g_device->callback(state);
+        }
+    }
+}
+
+static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyboard, bool consumer)
+{
+    if (!device || device->ble_state != DEVICE_STATE_CONNECTED)
+    {
+        return;
+    }
+
+    if (mouse)
+    {
+        esp_err_t err = hid_device_notify_mouse(device);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to notify mouse report: %s", esp_err_to_name(err));
+        }
+    }
+
+    if (keyboard)
+    {
+        esp_err_t err = hid_device_notify_keyboard(device);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to notify keyboard report: %s", esp_err_to_name(err));
+        }
+    }
+
+    if (consumer)
+    {
+        int attempts = 0;
+        while (attempts < 2 &&
+               (device->state.consumer_updated || device->state.consumer_pending_release))
+        {
+            esp_err_t err = hid_device_notify_consumer(device);
+            if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to notify consumer report: %s", esp_err_to_name(err));
+                break;
+            }
+
+            attempts++;
+
+            if (device->state.consumer_pending_release || device->state.consumer_updated)
+            {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
         }
     }
 }
