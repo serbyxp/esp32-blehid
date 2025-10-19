@@ -17,7 +17,6 @@
 
 static const char *TAG = "MAIN";
 
-#define DEFAULT_AP_SSID "ESP32-HID"
 #define DEFAULT_AP_PASS "composite"
 #define NOTIFY_INTERVAL_MS 50
 

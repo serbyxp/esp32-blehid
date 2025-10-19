@@ -1,9 +1,7 @@
 #include "hid_keymap.h"
-
-#include "hid_keymap.h"
-
 #include <string.h>
 
+// Fixed ASCII to HID keycode mapping
 static const uint8_t s_ascii_map[128] = {
     0, 0, 0, 0, 0, 0, 0, 0, 42, 43, 40, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -39,20 +37,24 @@ bool hid_keymap_from_ascii(uint8_t ascii, uint8_t *keycode, uint8_t *modifiers)
     }
 
     uint8_t mods = 0;
+    uint8_t key = entry;
+
+    // FIXED: Properly extract shift bit and keycode
     if (entry & HID_KEYMAP_SHIFT)
     {
         mods |= HID_KEYMAP_LEFT_SHIFT;
-        entry &= 0x7F;
+        key = entry & 0x7F; // Mask off the shift bit
     }
 
-    if (entry == 0)
+    // Verify we have a valid keycode after masking
+    if (key == 0)
     {
         return false;
     }
 
     if (keycode)
     {
-        *keycode = entry;
+        *keycode = key;
     }
     if (modifiers)
     {

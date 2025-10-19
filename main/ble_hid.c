@@ -23,154 +23,89 @@ static const char *TAG = "BLE_HID";
 // Combined HID Report Descriptor (Mouse + Keyboard + Consumer)
 static const uint8_t hid_report_map[] = {
     // Mouse (Report ID 1)
-    0x05,
-    0x01, // Usage Page (Generic Desktop)
-    0x09,
-    0x02, // Usage (Mouse)
-    0xA1,
-    0x01, // Collection (Application)
-    0x85,
-    0x01, //   Report ID (1)
-    0x09,
-    0x01, //   Usage (Pointer)
-    0xA1,
-    0x00, //   Collection (Physical)
-    0x05,
-    0x09, //     Usage Page (Buttons)
-    0x19,
-    0x01, //     Usage Minimum (1)
-    0x29,
-    0x03, //     Usage Maximum (3)
-    0x15,
-    0x00, //     Logical Minimum (0)
-    0x25,
-    0x01, //     Logical Maximum (1)
-    0x95,
-    0x03, //     Report Count (3)
-    0x75,
-    0x01, //     Report Size (1)
-    0x81,
-    0x02, //     Input (Data, Variable, Absolute)
-    0x95,
-    0x01, //     Report Count (1)
-    0x75,
-    0x05, //     Report Size (5)
-    0x81,
-    0x01, //     Input (Constant)
-    0x05,
-    0x01, //     Usage Page (Generic Desktop)
-    0x09,
-    0x30, //     Usage (X)
-    0x09,
-    0x31, //     Usage (Y)
-    0x09,
-    0x38, //     Usage (Wheel)
-    0x15,
-    0x81, //     Logical Minimum (-127)
-    0x25,
-    0x7F, //     Logical Maximum (127)
-    0x75,
-    0x08, //     Report Size (8)
-    0x95,
-    0x03, //     Report Count (3)
-    0x81,
-    0x06, //     Input (Data, Variable, Relative)
-    0xC0, //   End Collection
-    0xC0, // End Collection
+    0x05, 0x01,        // Usage Page (Generic Desktop)
+    0x09, 0x02,        // Usage (Mouse)
+    0xA1, 0x01,        // Collection (Application)
+    0x85, 0x01,        //   Report ID (1)
+    0x09, 0x01,        //   Usage (Pointer)
+    0xA1, 0x00,        //   Collection (Physical)
+    
+    // Buttons
+    0x05, 0x09,        //     Usage Page (Buttons)
+    0x19, 0x01,        //     Usage Minimum (Button 1)
+    0x29, 0x03,        //     Usage Maximum (Button 3)
+    0x15, 0x00,        //     Logical Minimum (0)
+    0x25, 0x01,        //     Logical Maximum (1)
+    0x95, 0x03,        //     Report Count (3)
+    0x75, 0x01,        //     Report Size (1)
+    0x81, 0x02,        //     Input (Data, Variable, Absolute)
+    
+    // Padding
+    0x95, 0x01,        //     Report Count (1)
+    0x75, 0x05,        //     Report Size (5)
+    0x81, 0x03,        //     Input (Constant, Variable, Absolute)
+    
+    // X, Y, Wheel
+    0x05, 0x01,        //     Usage Page (Generic Desktop)
+    0x09, 0x30,        //     Usage (X)
+    0x09, 0x31,        //     Usage (Y)
+    0x09, 0x38,        //     Usage (Wheel)
+    0x15, 0x81,        //     Logical Minimum (-127)
+    0x25, 0x7F,        //     Logical Maximum (127)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x03,        //     Report Count (3)
+    0x81, 0x06,        //     Input (Data, Variable, Relative)
+    0xC0,              //   End Collection
+    0xC0,              // End Collection
 
-    // Keyboard (Report ID 2)
-    0x05,
-    0x01, // Usage Page (Generic Desktop)
-    0x09,
-    0x06, // Usage (Keyboard)
-    0xA1,
-    0x01, // Collection (Application)
-    0x85,
-    0x02, //   Report ID (2)
-    0x05,
-    0x07, //   Usage Page (Key Codes)
-    0x19,
-    0xE0, //   Usage Minimum (224)
-    0x29,
-    0xE7, //   Usage Maximum (231)
-    0x15,
-    0x00, //   Logical Minimum (0)
-    0x25,
-    0x01, //   Logical Maximum (1)
-    0x75,
-    0x01, //   Report Size (1)
-    0x95,
-    0x08, //   Report Count (8)
-    0x81,
-    0x02, //   Input (Data, Variable, Absolute)
-    0x95,
-    0x01, //   Report Count (1)
-    0x75,
-    0x08, //   Report Size (8)
-    0x81,
-    0x01, //   Input (Constant)
-    0x95,
-    0x05, //   Report Count (5)
-    0x75,
-    0x01, //   Report Size (1)
-    0x05,
-    0x08, //   Usage Page (LEDs)
-    0x19,
-    0x01, //   Usage Minimum (1)
-    0x29,
-    0x05, //   Usage Maximum (5)
-    0x91,
-    0x02, //   Output (Data, Variable, Absolute)
-    0x95,
-    0x01, //   Report Count (1)
-    0x75,
-    0x03, //   Report Size (3)
-    0x91,
-    0x01, //   Output (Constant)
-    0x95,
-    0x06, //   Report Count (6)
-    0x75,
-    0x08, //   Report Size (8)
-    0x15,
-    0x00, //   Logical Minimum (0)
-    0x25,
-    0x65, //   Logical Maximum (101)
-    0x05,
-    0x07, //   Usage Page (Key Codes)
-    0x19,
-    0x00, //   Usage Minimum (0)
-    0x29,
-    0x65, //   Usage Maximum (101)
-    0x81,
-    0x00, //   Input (Data, Array)
-    0xC0, // End Collection
+    // Keyboard (Report ID 2) - UNCHANGED
+    0x05, 0x01,        // Usage Page (Generic Desktop)
+    0x09, 0x06,        // Usage (Keyboard)
+    0xA1, 0x01,        // Collection (Application)
+    0x85, 0x02,        //   Report ID (2)
+    0x05, 0x07,        //   Usage Page (Key Codes)
+    0x19, 0xE0,        //   Usage Minimum (224)
+    0x29, 0xE7,        //   Usage Maximum (231)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x25, 0x01,        //   Logical Maximum (1)
+    0x75, 0x01,        //   Report Size (1)
+    0x95, 0x08,        //   Report Count (8)
+    0x81, 0x02,        //   Input (Data, Variable, Absolute)
+    0x95, 0x01,        //   Report Count (1)
+    0x75, 0x08,        //   Report Size (8)
+    0x81, 0x01,        //   Input (Constant)
+    0x95, 0x05,        //   Report Count (5)
+    0x75, 0x01,        //   Report Size (1)
+    0x05, 0x08,        //   Usage Page (LEDs)
+    0x19, 0x01,        //   Usage Minimum (1)
+    0x29, 0x05,        //   Usage Maximum (5)
+    0x91, 0x02,        //   Output (Data, Variable, Absolute)
+    0x95, 0x01,        //   Report Count (1)
+    0x75, 0x03,        //   Report Size (3)
+    0x91, 0x01,        //   Output (Constant)
+    0x95, 0x06,        //   Report Count (6)
+    0x75, 0x08,        //   Report Size (8)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x25, 0x65,        //   Logical Maximum (101)
+    0x05, 0x07,        //   Usage Page (Key Codes)
+    0x19, 0x00,        //   Usage Minimum (0)
+    0x29, 0x65,        //   Usage Maximum (101)
+    0x81, 0x00,        //   Input (Data, Array)
+    0xC0,              // End Collection
 
-    // Consumer Control (Report ID 3)
-    0x05,
-    0x0C, // Usage Page (Consumer)
-    0x09,
-    0x01, // Usage (Consumer Control)
-    0xA1,
-    0x01, // Collection (Application)
-    0x85,
-    0x03, //   Report ID (3)
-    0x15,
-    0x00, //   Logical Minimum (0)
-    0x26,
-    0xFF,
-    0x03, //   Logical Maximum (1023)
-    0x19,
-    0x00, //   Usage Minimum (0)
-    0x2A,
-    0xFF,
-    0x03, //   Usage Maximum (1023)
-    0x75,
-    0x10, //   Report Size (16)
-    0x95,
-    0x01, //   Report Count (1)
-    0x81,
-    0x00, //   Input (Data, Array)
-    0xC0, // End Collection
+    // Consumer Control (Report ID 3) - UNCHANGED
+    0x05, 0x0C,        // Usage Page (Consumer)
+    0x09, 0x01,        // Usage (Consumer Control)
+    0xA1, 0x01,        // Collection (Application)
+    0x85, 0x03,        //   Report ID (3)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x26, 0xFF, 0x03,  //   Logical Maximum (1023)
+    0x19, 0x00,        //   Usage Minimum (0)
+    0x2A, 0xFF, 0x03,  //   Usage Maximum (1023)
+    0x75, 0x10,        //   Report Size (16)
+    0x95, 0x01,        //   Report Count (1)
+    0x81, 0x00,        //   Input (Data, Array)
+    0xC0,              // End Collection
 };
 
 // Report Reference descriptors
@@ -954,16 +889,16 @@ esp_err_t ble_hid_notify_mouse(const mouse_state_t *state)
     }
 
     // Update report storage
-    s_mouse_report[0] = 0x01; // Report ID
+    s_mouse_report[0] = 0x01;           // Report ID
     s_mouse_report[1] = state->buttons & 0x07;
-    s_mouse_report[2] = state->x;
-    s_mouse_report[3] = state->y;
-    s_mouse_report[4] = state->wheel;
+    s_mouse_report[2] = (int8_t)state->x;  // Cast to ensure sign extension
+    s_mouse_report[3] = (int8_t)state->y;
+    s_mouse_report[4] = (int8_t)state->wheel;
 
     // Boot report (no Report ID)
     s_boot_mouse_report[0] = state->buttons & 0x07;
-    s_boot_mouse_report[1] = state->x;
-    s_boot_mouse_report[2] = state->y;
+    s_boot_mouse_report[1] = (int8_t)state->x;
+    s_boot_mouse_report[2] = (int8_t)state->y;
 
     esp_err_t result = ESP_OK;
 

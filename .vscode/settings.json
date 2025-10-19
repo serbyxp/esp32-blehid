@@ -2,7 +2,10 @@
     "files.associations": {
         "wifi_manager.h": "c",
         "string.h": "c",
-        "ble_hid.h": "c"
+        "ble_hid.h": "c",
+        "format": "c",
+        "stacktrace": "c",
+        "thread": "c"
     },
     "idf.portWin": "COM3",
     "idf.flashType": "UART"
