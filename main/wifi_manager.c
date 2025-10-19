@@ -40,6 +40,14 @@ static TimerHandle_t s_sta_retry_timer = NULL;
 
 #define MAX_STA_RETRY 5
 #define STA_RETRY_DELAY_MS 5000
+static void stop_wifi_if_running(void)
+{
+    esp_err_t err = esp_wifi_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT && err != ESP_ERR_WIFI_NOT_STARTED)
+    {
+        ESP_LOGW(TAG, "esp_wifi_stop returned %s", esp_err_to_name(err));
+    }
+}
 
 static void sta_retry_timer_callback(TimerHandle_t xTimer)
 {
@@ -110,7 +118,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         else
         {
             ESP_LOGW(TAG, "Max retries reached, fallback to AP mode");
-            // Will be handled by main.c
             if (s_sta_retry_timer)
             {
                 xTimerStop(s_sta_retry_timer, 0);
@@ -282,11 +289,32 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
 
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t mode_err = esp_wifi_get_mode(&mode);
+    if (mode_err != ESP_OK && mode_err != ESP_ERR_WIFI_NOT_INIT)
+    {
+        ESP_LOGE(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(mode_err));
+        return mode_err;
+    }
+
+    if (mode != WIFI_MODE_NULL && mode != WIFI_MODE_AP)
+    {
+        stop_wifi_if_running();
+    }
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+
+    esp_err_t start_err = esp_wifi_start();
+    if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_CONN)
+    {
+        ESP_LOGE(TAG, "esp_wifi_start (AP) failed: %s", esp_err_to_name(start_err));
+        return start_err;
+    }
 
     s_current_mode = WIFI_MODE_AP;
+    s_wifi_connected = false;
+    s_sta_retry_count = 0;
     s_restore_ap_on_scan = false;
 
     ESP_LOGI(TAG, "AP started: SSID=%s, IP=192.168.4.1", s_ap_ssid);
@@ -323,11 +351,31 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
 
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t mode_err = esp_wifi_get_mode(&mode);
+    if (mode_err != ESP_OK && mode_err != ESP_ERR_WIFI_NOT_INIT)
+    {
+        ESP_LOGE(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(mode_err));
+        return mode_err;
+    }
+
+    if (mode != WIFI_MODE_NULL && mode != WIFI_MODE_STA)
+    {
+        stop_wifi_if_running();
+    }
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+
+    esp_err_t start_err = esp_wifi_start();
+    if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_CONN)
+    {
+        ESP_LOGE(TAG, "esp_wifi_start (STA) failed: %s", esp_err_to_name(start_err));
+        return start_err;
+    }
 
     s_current_mode = WIFI_MODE_STA;
+    s_wifi_connected = false;
     s_sta_retry_count = 0;
     s_restore_ap_on_scan = false;
 
@@ -436,6 +484,11 @@ esp_err_t wifi_manager_stop(void)
     s_restore_ap_on_scan = false;
 
     esp_err_t err = esp_wifi_stop();
+    if (err == ESP_ERR_WIFI_NOT_INIT || err == ESP_ERR_WIFI_NOT_STARTED)
+    {
+        err = ESP_OK;
+    }
+
     if (err == ESP_OK)
     {
         s_current_mode = WIFI_MODE_NULL;
@@ -444,6 +497,11 @@ esp_err_t wifi_manager_stop(void)
         ESP_LOGI(TAG, "WiFi stopped");
         http_server_publish_wifi_status();
     }
+    else
+    {
+        ESP_LOGE(TAG, "esp_wifi_stop failed: %s", esp_err_to_name(err));
+    }
+
     return err;
 }
 

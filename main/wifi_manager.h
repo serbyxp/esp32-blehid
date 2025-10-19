@@ -19,6 +19,8 @@ typedef struct
 
 typedef void (*wifi_scan_callback_t)(const wifi_ap_record_t *records, uint16_t count);
 
+#define WIFI_MANAGER_DEFAULT_AP_PASS "composite"
+
 esp_err_t wifi_manager_init(void);
 esp_err_t wifi_manager_start_ap(const char *ssid, const char *password);
 esp_err_t wifi_manager_start_sta(const char *ssid, const char *password);
