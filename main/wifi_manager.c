@@ -8,6 +8,8 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "lwip/inet.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
 
 #ifdef __has_include
 #if __has_include("mdns.h")
@@ -34,9 +36,24 @@ static wifi_scan_callback_t s_scan_callback = NULL;
 static bool s_restore_ap_on_scan = false;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
+static TimerHandle_t s_sta_retry_timer = NULL;
 
 #define MAX_STA_RETRY 5
 #define STA_RETRY_DELAY_MS 5000
+
+static void sta_retry_timer_callback(TimerHandle_t xTimer)
+{
+    ESP_LOGI(TAG, "Retry timer expired, attempting to reconnect");
+
+    if (!s_scanning)
+    {
+        esp_wifi_connect();
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Retry skipped because STA is scanning");
+    }
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -68,18 +85,36 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         {
             ESP_LOGW(TAG, "Connection failed (reason %d), will fallback to AP mode", event->reason);
             s_sta_retry_count = MAX_STA_RETRY; // Force fallback
+            if (s_sta_retry_timer)
+            {
+                xTimerStop(s_sta_retry_timer, 0);
+            }
         }
         else if (s_sta_retry_count < MAX_STA_RETRY)
         {
             s_sta_retry_count++;
             ESP_LOGI(TAG, "Retry %d/%d in %dms", s_sta_retry_count, MAX_STA_RETRY, STA_RETRY_DELAY_MS);
-            vTaskDelay(pdMS_TO_TICKS(STA_RETRY_DELAY_MS));
-            esp_wifi_connect();
+            if (s_sta_retry_timer)
+            {
+                if (xTimerIsTimerActive(s_sta_retry_timer) == pdTRUE)
+                {
+                    xTimerStop(s_sta_retry_timer, 0);
+                }
+                if (xTimerChangePeriod(s_sta_retry_timer, pdMS_TO_TICKS(STA_RETRY_DELAY_MS), 0) != pdPASS ||
+                    xTimerStart(s_sta_retry_timer, 0) != pdPASS)
+                {
+                    ESP_LOGE(TAG, "Failed to schedule STA retry timer");
+                }
+            }
         }
         else
         {
             ESP_LOGW(TAG, "Max retries reached, fallback to AP mode");
             // Will be handled by main.c
+            if (s_sta_retry_timer)
+            {
+                xTimerStop(s_sta_retry_timer, 0);
+            }
         }
         http_server_publish_wifi_status();
     }
@@ -89,6 +124,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_wifi_connected = true;
         s_sta_retry_count = 0;
+        if (s_sta_retry_timer)
+        {
+            xTimerStop(s_sta_retry_timer, 0);
+        }
 
 #if WIFI_MANAGER_HAS_MDNS
         // Update mDNS
@@ -166,6 +205,17 @@ esp_err_t wifi_manager_init(void)
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    if (!s_sta_retry_timer)
+    {
+        s_sta_retry_timer = xTimerCreate("sta_retry", pdMS_TO_TICKS(STA_RETRY_DELAY_MS), pdFALSE, NULL,
+                                         sta_retry_timer_callback);
+        if (!s_sta_retry_timer)
+        {
+            ESP_LOGE(TAG, "Failed to create STA retry timer");
+            return ESP_FAIL;
+        }
+    }
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                                &wifi_event_handler, NULL));
