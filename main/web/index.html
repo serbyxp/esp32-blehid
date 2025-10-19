@@ -629,6 +629,30 @@
             peer_addr: 'n/a',
             addr_type: 0
         };
+        const KEYBOARD_RELEASE_DELAY_MS = 35;
+        const ASCII_SEND_DELAY_MS = 20;
+        const asciiQueue = [];
+        let asciiProcessing = false;
+
+        async function processAsciiQueue() {
+            while (asciiQueue.length > 0) {
+                const value = asciiQueue.shift();
+                if (!sendMessage({ type: 'keyboard', ascii: value })) {
+                    asciiQueue.length = 0;
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, ASCII_SEND_DELAY_MS));
+            }
+            asciiProcessing = false;
+        }
+
+        function enqueueAscii(codePoint) {
+            asciiQueue.push(codePoint);
+            if (!asciiProcessing) {
+                asciiProcessing = true;
+                processAsciiQueue();
+            }
+        }
 
         function markFieldDirty(event) {
             event.target.dataset.userEdited = '1';
@@ -1201,7 +1225,7 @@
             sendMessage(payload);
             setTimeout(() => {
                 sendMessage({ type: 'keyboard', keys: [], modifiers: {} });
-            }, 40);
+            }, KEYBOARD_RELEASE_DELAY_MS);
         }
 
         function sendKeyboardAscii(ch) {
@@ -1210,11 +1234,11 @@
             }
 
             const codePoint = ch.codePointAt(0);
-            if (!Number.isInteger(codePoint)) {
+            if (!Number.isInteger(codePoint) || codePoint > 0xFF) {
                 return;
             }
 
-            sendMessage({ type: 'keyboard', ascii: codePoint });
+            enqueueAscii(codePoint);
         }
 
         function sendKeyboardText(text) {

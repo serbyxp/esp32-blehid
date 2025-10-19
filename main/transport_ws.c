@@ -4,15 +4,24 @@
 #include "http_server.h"
 #include "hid_keymap.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 #include <string.h>
 #include <stdlib.h>
 
 static const char *TAG = "WS_TRANSPORT";
 
 #define WS_MAX_CLIENTS 4
+#define WS_ASCII_QUEUE_LEN 64
+#define WS_ASCII_RELEASE_DELAY_MS 12
+#define WS_ASCII_INTERCHAR_DELAY_MS 6
+#define WS_ASCII_SENTINEL 0xFFFF
 
 static httpd_handle_t s_server = NULL;
 static transport_callbacks_t s_callbacks = {0};
+static QueueHandle_t s_ascii_queue = NULL;
+static TaskHandle_t s_ascii_task = NULL;
 
 typedef struct
 {
@@ -30,6 +39,7 @@ static void ws_send_keyboard_press(uint8_t keycode, uint8_t modifiers);
 static void ws_send_keyboard_release(void);
 static void ws_send_ascii_char(uint8_t ascii);
 static void ws_send_ascii_text(const char *text);
+static void ws_ascii_task(void *arg);
 
 static esp_err_t ws_handler(httpd_req_t *req)
 {
@@ -282,6 +292,21 @@ static void ws_send_keyboard_release(void)
 
 static void ws_send_ascii_char(uint8_t ascii)
 {
+    if (!s_callbacks.on_keyboard)
+    {
+        return;
+    }
+
+    if (s_ascii_queue)
+    {
+        uint16_t value = ascii;
+        if (xQueueSend(s_ascii_queue, &value, pdMS_TO_TICKS(50)) != pdPASS)
+        {
+            ESP_LOGW(TAG, "ASCII queue full, dropping char %u", ascii);
+        }
+        return;
+    }
+
     uint8_t keycode = 0;
     uint8_t modifiers = 0;
     if (!hid_keymap_from_ascii(ascii, &keycode, &modifiers))
@@ -291,7 +316,9 @@ static void ws_send_ascii_char(uint8_t ascii)
     }
 
     ws_send_keyboard_press(keycode, modifiers);
+    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS));
     ws_send_keyboard_release();
+    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS));
 }
 
 static void ws_send_ascii_text(const char *text)
@@ -307,6 +334,45 @@ static void ws_send_ascii_text(const char *text)
     }
 }
 
+static void ws_ascii_task(void *arg)
+{
+    uint16_t ascii = 0;
+
+    while (true)
+    {
+        if (xQueueReceive(s_ascii_queue, &ascii, portMAX_DELAY) != pdTRUE)
+        {
+            continue;
+        }
+
+        if (ascii == WS_ASCII_SENTINEL)
+        {
+            break;
+        }
+
+        if (!s_callbacks.on_keyboard)
+        {
+            continue;
+        }
+
+        uint8_t keycode = 0;
+        uint8_t modifiers = 0;
+        if (!hid_keymap_from_ascii((uint8_t)ascii, &keycode, &modifiers))
+        {
+            ESP_LOGW(TAG, "Unsupported ASCII character: %u", ascii);
+            continue;
+        }
+
+        ws_send_keyboard_press(keycode, modifiers);
+        vTaskDelay(pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS));
+        ws_send_keyboard_release();
+        vTaskDelay(pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS));
+    }
+
+    s_ascii_task = NULL;
+    vTaskDelete(NULL);
+}
+
 esp_err_t transport_websocket_init(const transport_callbacks_t *callbacks, uint16_t port)
 {
     if (!callbacks)
@@ -319,6 +385,25 @@ esp_err_t transport_websocket_init(const transport_callbacks_t *callbacks, uint1
     {
         s_clients[i].fd = -1;
         s_clients[i].active = false;
+    }
+
+    if (!s_ascii_queue)
+    {
+        s_ascii_queue = xQueueCreate(WS_ASCII_QUEUE_LEN, sizeof(uint16_t));
+        if (!s_ascii_queue)
+        {
+            ESP_LOGE(TAG, "Failed to create ASCII queue");
+        }
+    }
+
+    if (s_ascii_queue && !s_ascii_task)
+    {
+        if (xTaskCreate(ws_ascii_task, "ws_ascii", 3072, NULL, tskIDLE_PRIORITY + 2, &s_ascii_task) != pdPASS)
+        {
+            ESP_LOGE(TAG, "Failed to start ASCII task");
+            vQueueDelete(s_ascii_queue);
+            s_ascii_queue = NULL;
+        }
     }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -347,6 +432,22 @@ esp_err_t transport_websocket_init(const transport_callbacks_t *callbacks, uint1
 
 esp_err_t transport_websocket_deinit(void)
 {
+    if (s_ascii_queue)
+    {
+        if (s_ascii_task)
+        {
+            uint16_t sentinel = WS_ASCII_SENTINEL;
+            xQueueSend(s_ascii_queue, &sentinel, portMAX_DELAY);
+            for (int i = 0; i < 10 && s_ascii_task; ++i)
+            {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        }
+
+        vQueueDelete(s_ascii_queue);
+        s_ascii_queue = NULL;
+    }
+
     if (s_server)
     {
         httpd_stop(s_server);

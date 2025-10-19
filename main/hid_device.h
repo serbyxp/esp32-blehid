@@ -74,6 +74,7 @@ esp_err_t hid_device_stop_advertising(hid_device_t *device);
 void hid_device_set_mouse_state(hid_device_t *device, const mouse_state_t *state);
 void hid_device_set_keyboard_state(hid_device_t *device, const keyboard_state_t *state);
 void hid_device_set_consumer_state(hid_device_t *device, const consumer_state_t *state);
+void hid_device_request_notify(hid_device_t *device, bool mouse, bool keyboard, bool consumer);
 esp_err_t hid_device_notify_mouse(hid_device_t *device);
 esp_err_t hid_device_notify_keyboard(hid_device_t *device);
 esp_err_t hid_device_notify_consumer(hid_device_t *device);
