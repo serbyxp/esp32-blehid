@@ -4,9 +4,11 @@ ESP32 Composite HID Client Example
 Demonstrates control via both UART and WebSocket
 """
 
-import json
-import time
 import argparse
+import json
+import logging
+import time
+
 import serial
 import websocket
 
@@ -115,38 +117,79 @@ class WebSocketClient(HIDClient):
         self.ws.close()
 
 
-# HID Key Codes
-HID_KEYS = {
-    'a': 0x04, 'b': 0x05, 'c': 0x06, 'd': 0x07,
-    'e': 0x08, 'f': 0x09, 'g': 0x0A, 'h': 0x0B,
-    'i': 0x0C, 'j': 0x0D, 'k': 0x0E, 'l': 0x0F,
-    'm': 0x10, 'n': 0x11, 'o': 0x12, 'p': 0x13,
-    'q': 0x14, 'r': 0x15, 's': 0x16, 't': 0x17,
-    'u': 0x18, 'v': 0x19, 'w': 0x1A, 'x': 0x1B,
-    'y': 0x1C, 'z': 0x1D,
-    '1': 0x1E, '2': 0x1F, '3': 0x20, '4': 0x21,
-    '5': 0x22, '6': 0x23, '7': 0x24, '8': 0x25,
-    '9': 0x26, '0': 0x27,
-    'enter': 0x28, 'esc': 0x29, 'backspace': 0x2A,
-    'tab': 0x2B, 'space': 0x2C,
-}
+HID_KEYMAP_SHIFT = 0x80
+HID_KEYMAP_LEFT_SHIFT = 0x02
+
+# Fixed ASCII to HID keycode mapping copied from firmware
+ASCII_TO_HID = [
+    0, 0, 0, 0, 0, 0, 0, 0, 42, 43, 40, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    44, 158, 180, 160, 161, 162, 164, 52, 166, 167, 165, 174, 54, 45, 55, 56,
+    39, 30, 31, 32, 33, 34, 35, 36, 37, 38, 179, 51, 182, 46, 183, 184,
+    159, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146,
+    147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 47, 49, 48, 163, 173,
+    53, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+    19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 175, 177, 176, 181, 0,
+]
+
+
+def ascii_to_hid(char):
+    """Convert a single character to HID keycode and modifiers."""
+    if not char:
+        return None
+
+    ascii_code = ord(char)
+    if ascii_code == 13:  # Carriage return uses the newline entry
+        ascii_code = 10
+
+    if ascii_code >= len(ASCII_TO_HID):
+        return None
+
+    entry = ASCII_TO_HID[ascii_code]
+    if entry == 0:
+        return None
+
+    modifiers = 0
+    keycode = entry
+    if entry & HID_KEYMAP_SHIFT:
+        modifiers |= HID_KEYMAP_LEFT_SHIFT
+        keycode = entry & 0x7F
+
+    if keycode == 0:
+        return None
+
+    return keycode, modifiers
+
+
+def modifiers_mask_to_dict(mask):
+    """Convert a modifier bitmask to the JSON structure expected by the firmware."""
+    return {
+        "left_control": False,
+        "left_shift": bool(mask & HID_KEYMAP_LEFT_SHIFT),
+        "left_alt": False,
+        "left_gui": False,
+        "right_control": False,
+        "right_shift": False,
+        "right_alt": False,
+        "right_gui": False,
+    }
 
 
 def type_string(client, text, delay=0.05):
     """Type a string character by character"""
-    for char in text.lower():
-        if char in HID_KEYS:
-            # Press key
-            client.send_keyboard(keys=[HID_KEYS[char]])
-            time.sleep(delay)
-            # Release key
-            client.send_keyboard(keys=[])
-            time.sleep(delay)
-        elif char == ' ':
-            client.send_keyboard(keys=[HID_KEYS['space']])
-            time.sleep(delay)
-            client.send_keyboard(keys=[])
-            time.sleep(delay)
+    for char in text:
+        mapping = ascii_to_hid(char)
+        if not mapping:
+            logging.warning("Unsupported ASCII character: %r", char)
+            continue
+
+        keycode, modifiers = mapping
+        modifiers_dict = modifiers_mask_to_dict(modifiers)
+
+        client.send_keyboard(keys=[keycode], modifiers=modifiers_dict)
+        time.sleep(delay)
+        client.send_keyboard(keys=[], modifiers=modifiers_mask_to_dict(0))
+        time.sleep(delay)
 
 
 def demo_mouse_circle(client, radius=50, steps=36):
@@ -180,15 +223,20 @@ def demo_keyboard(client):
     print("Typing 'hello world'...")
     type_string(client, "hello world")
     time.sleep(0.5)
-    
+
     print("Typing with Enter...")
     type_string(client, "test")
-    client.send_keyboard(keys=[HID_KEYS['enter']])
-    time.sleep(0.05)
-    client.send_keyboard(keys=[])
+    enter_mapping = ascii_to_hid('\n')
+    if enter_mapping:
+        keycode, modifiers = enter_mapping
+        client.send_keyboard(keys=[keycode], modifiers=modifiers_mask_to_dict(modifiers))
+        time.sleep(0.05)
+        client.send_keyboard(keys=[], modifiers=modifiers_mask_to_dict(0))
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
+
     parser = argparse.ArgumentParser(description='ESP32 HID Client Demo')
     parser.add_argument('--transport', choices=['uart', 'ws'], default='ws',
                        help='Transport type (uart or ws)')
