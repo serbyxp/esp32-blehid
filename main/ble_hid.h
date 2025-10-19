@@ -53,7 +53,8 @@ esp_err_t ble_hid_stop_advertising(void);
 // Send HID reports
 esp_err_t ble_hid_notify_mouse(const mouse_state_t *state);
 esp_err_t ble_hid_notify_keyboard(const keyboard_state_t *state);
-esp_err_t ble_hid_notify_consumer(uint16_t usage);
+uint16_t ble_hid_consumer_usage_to_mask(uint16_t usage);
+esp_err_t ble_hid_notify_consumer(uint16_t usage_mask);
 
 // Connection state
 bool ble_hid_is_connected(void);

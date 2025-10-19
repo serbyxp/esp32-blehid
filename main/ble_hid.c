@@ -14,6 +14,7 @@
 #include "store/config/ble_store_config.h"
 #include "nvs_keystore.h"
 #include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 
 void ble_store_config_init(void);
@@ -87,19 +88,53 @@ static const uint8_t hid_report_map[] = {
     0x81, 0x00,        //   Input (Data, Array)
     0xC0,              // End Collection
 
-    // Consumer Control (Report ID 3)
+    // Consumer Control (Report ID 3) — ESP32 combo bitfield layout
     0x05, 0x0C,        // Usage Page (Consumer)
     0x09, 0x01,        // Usage (Consumer Control)
     0xA1, 0x01,        // Collection (Application)
     0x85, 0x03,        //   Report ID (3)
+    0x05, 0x0C,        //   Usage Page (Consumer)
     0x15, 0x00,        //   Logical Minimum (0)
-    0x26, 0xFF, 0x03,  //   Logical Maximum (1023)
-    0x19, 0x00,        //   Usage Minimum (0)
-    0x2A, 0xFF, 0x03,  //   Usage Maximum (1023)
-    0x75, 0x10,        //   Report Size (16)
-    0x95, 0x01,        //   Report Count (1)
-    0x81, 0x00,        //   Input (Data, Array)
+    0x25, 0x01,        //   Logical Maximum (1)
+    0x75, 0x01,        //   Report Size (1)
+    0x95, 0x10,        //   Report Count (16)
+    0x09, 0xB5,        //   Usage (Scan Next Track)
+    0x09, 0xB6,        //   Usage (Scan Previous Track)
+    0x09, 0xB7,        //   Usage (Stop)
+    0x09, 0xCD,        //   Usage (Play/Pause)
+    0x09, 0xE2,        //   Usage (Mute)
+    0x09, 0xE9,        //   Usage (Volume Up)
+    0x09, 0xEA,        //   Usage (Volume Down)
+    0x0A, 0x23, 0x02,  //   Usage (AC Home / WWW Home)
+    0x0A, 0x94, 0x01,  //   Usage (AL My Computer)
+    0x0A, 0x92, 0x01,  //   Usage (AL Calculator)
+    0x0A, 0x2A, 0x02,  //   Usage (AC Bookmarks)
+    0x0A, 0x21, 0x02,  //   Usage (AC Search)
+    0x0A, 0x26, 0x02,  //   Usage (AC Stop)
+    0x0A, 0x24, 0x02,  //   Usage (AC Back)
+    0x0A, 0x83, 0x01,  //   Usage (AL Consumer Control Configuration / Media Select)
+    0x0A, 0x8A, 0x01,  //   Usage (AL Email Reader / Mail)
+    0x81, 0x02,        //   Input (Data, Variable, Absolute)
     0xC0,              // End Collection
+};
+
+static const uint16_t s_consumer_usages[] = {
+    0x00B5, // Scan Next Track
+    0x00B6, // Scan Previous Track
+    0x00B7, // Stop
+    0x00CD, // Play/Pause
+    0x00E2, // Mute
+    0x00E9, // Volume Up
+    0x00EA, // Volume Down
+    0x0223, // WWW Home
+    0x0194, // My Computer
+    0x0192, // Calculator
+    0x022A, // WWW Favorites
+    0x0221, // WWW Search
+    0x0226, // WWW Stop
+    0x0224, // WWW Back
+    0x0183, // Media Select
+    0x018A, // Mail
 };
 
 // Report Reference descriptors
@@ -257,6 +292,26 @@ static int keyboard_output_access(uint16_t conn_handle, uint16_t attr_handle,
 }
 
 // Consumer Report (Report ID 3)
+uint16_t ble_hid_consumer_usage_to_mask(uint16_t usage)
+{
+    if (usage == 0)
+    {
+        return 0;
+    }
+
+    size_t count = sizeof(s_consumer_usages) / sizeof(s_consumer_usages[0]);
+    for (size_t i = 0; i < count; ++i)
+    {
+        uint16_t mask = (uint16_t)(1u << i);
+        if (usage == s_consumer_usages[i] || usage == mask)
+        {
+            return mask;
+        }
+    }
+
+    return 0;
+}
+
 static int consumer_report_access(uint16_t conn_handle, uint16_t attr_handle,
                                   struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -1011,19 +1066,26 @@ esp_err_t ble_hid_notify_keyboard(const keyboard_state_t *state)
     return result;
 }
 
-esp_err_t ble_hid_notify_consumer(uint16_t usage)
+esp_err_t ble_hid_notify_consumer(uint16_t usage_mask)
 {
     if (!s_handles.connected || !s_handles.subscribed_consumer)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
-    s_consumer_report = usage;
+    uint16_t report_mask = ble_hid_consumer_usage_to_mask(usage_mask);
+
+    if (usage_mask != 0 && report_mask == 0)
+    {
+        ESP_LOGW(TAG, "Unsupported consumer usage: 0x%04X", usage_mask);
+    }
+
+    s_consumer_report = report_mask;
 
     uint8_t report[3];
     report[0] = 0x03; // Report ID
-    report[1] = usage & 0xFF;
-    report[2] = (usage >> 8) & 0xFF;
+    report[1] = report_mask & 0xFF;
+    report[2] = (report_mask >> 8) & 0xFF;
 
     struct os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
     if (!om)

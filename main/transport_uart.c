@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "driver/uart.h"
 #include "hid_keymap.h"
+#include "ble_hid.h"
 #include "cJSON.h"
 #include <string.h>
 
@@ -258,7 +259,21 @@ static void process_message(const char *line)
             {
                 value = 0xFFFF;
             }
-            state.usage = (uint16_t)value;
+
+            uint16_t raw_usage = (uint16_t)value;
+            uint16_t mask = ble_hid_consumer_usage_to_mask(raw_usage);
+
+            if (raw_usage != 0 && mask == 0)
+            {
+                ESP_LOGW(TAG, "Unsupported consumer usage from UART: 0x%04X", raw_usage);
+                state.active = false;
+                state.hold = false;
+                state.usage = 0;
+            }
+            else
+            {
+                state.usage = mask;
+            }
         }
 
         if (pressed_item)
