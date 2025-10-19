@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -436,7 +436,7 @@
 
 <body>
     <div class="container">
-        <h1>ðŸ–±ï¸ <span id="deviceTitle">ESP32 HID</span></h1>
+        <h1>🖱️ <span id="deviceTitle">ESP32 HID</span></h1>
 
         <!-- Status Bar -->
         <div class="card">
@@ -471,7 +471,7 @@
 
         <!-- Device Info -->
         <div class="card">
-            <h2>ðŸ“Ÿ Device Info</h2>
+            <h2>📟 Device Info</h2>
             <div class="info-grid">
                 <div class="info-item">
                     <span class="info-label">Hostname</span>
@@ -507,11 +507,10 @@
 
         <!-- WiFi Configuration -->
         <div class="card">
-            <h2>ðŸ“¡ WiFi Configuration</h2>
+            <h2>📡 WiFi Configuration</h2>
 
             <div class="input-group">
-                <label>Available Networks <button onclick="scanWifi()" id="scanBtn" class="secondary">ðŸ”
-                        Scan</button></label>
+                <label>Available Networks <button onclick="scanWifi()" id="scanBtn" class="secondary">🔍 Scan</button></label>
                 <div class="wifi-list" id="wifiList" style="display:none;"></div>
                 <div id="scanStatus" class="scan-status">Ready to scan for Wi-Fi networks.</div>
             </div>
@@ -530,7 +529,7 @@
 
         <!-- Mouse Control -->
         <div class="card">
-            <h2>ðŸ–±ï¸ Mouse Control</h2>
+            <h2>🖱️ Mouse Control</h2>
             <div class="mouse-pad" id="mousePad"></div>
             <div class="button-grid">
                 <button onmousedown="setMouseButton('left', true)" onmouseup="setMouseButton('left', false)">Left
@@ -541,49 +540,54 @@
                     Click</button>
             </div>
             <div style="margin-top: 12px;">
-                <button onclick="scrollWheel(1)">â†‘ Scroll Up</button>
-                <button onclick="scrollWheel(-1)">â†“ Scroll Down</button>
+                <button onclick="scrollWheel(1)">↑ Scroll Up</button>
+                <button onclick="scrollWheel(-1)">↓ Scroll Down</button>
             </div>
         </div>
 
         <!-- Keyboard Control -->
         <div class="card">
-            <h2>âŒ¨ï¸ Keyboard Control</h2>
+            <h2>⌨️ Keyboard Control</h2>
             <div class="input-group">
                 <label for="textToType">Text to Type</label>
                 <textarea id="textToType" placeholder="Enter text...">Hello from ESP32!</textarea>
             </div>
             <button onclick="typeText()" class="success">Type Text</button>
-            <button onclick="pressKey(0x28)">Enter</button>
-            <button onclick="pressKey(0x2C)">Space</button>
+            <button onclick="pressKey(0x28)">Press Enter</button>
+            <button onclick="pressKey(0x2C)">Press Space</button>
             <button onclick="pressKey(0x2A)">Backspace</button>
+            <button onclick="testKeyboardSequence()" class="secondary">Test Key Sequence</button>
 
             <div style="margin-top: 12px;">
-                <span class="keyboard-key" onclick="pressKey('A')">A</span>
-                <span class="keyboard-key" onclick="pressKey('B')">B</span>
-                <span class="keyboard-key" onclick="pressKey('C')">C</span>
-                <span class="keyboard-key" onclick="pressKey('1')">1</span>
-                <span class="keyboard-key" onclick="pressKey('2')">2</span>
-                <span class="keyboard-key" onclick="pressKey('3')">3</span>
+                <strong>Quick Keys:</strong><br>
+                <span class="keyboard-key" onclick="pressKey(0x04)">A</span>
+                <span class="keyboard-key" onclick="pressKey(0x05)">B</span>
+                <span class="keyboard-key" onclick="pressKey(0x06)">C</span>
+                <span class="keyboard-key" onclick="pressKey(0x1E)">1</span>
+                <span class="keyboard-key" onclick="pressKey(0x1F)">2</span>
+                <span class="keyboard-key" onclick="pressKey(0x20)">3</span>
+                <span class="keyboard-key" onclick="pressKey(0x2C)">Space</span>
+                <span class="keyboard-key" onclick="pressKey(0x28)">Enter</span>
+                <span class="keyboard-key" onclick="pressKey(0x2A)">Backspace</span>
             </div>
         </div>
 
         <!-- Media Controls -->
         <div class="card">
-            <h2>ðŸŽµ Media Controls</h2>
+            <h2>🎵 Media Controls</h2>
             <div class="test-grid">
-                <div class="test-button" onclick="sendConsumer(0xE9)">ðŸ”Š Vol+</div>
-                <div class="test-button" onclick="sendConsumer(0xEA)">ðŸ”‰ Vol-</div>
-                <div class="test-button" onclick="sendConsumer(0xE2)">ðŸ”‡ Mute</div>
-                <div class="test-button" onclick="sendConsumer(0xCD)">â–¶ï¸ Play</div>
-                <div class="test-button" onclick="sendConsumer(0xB5)">â­ï¸ Next</div>
-                <div class="test-button" onclick="sendConsumer(0xB6)">â®ï¸ Prev</div>
+                <div class="test-button" onclick="sendConsumer(0xE9)">🔊 Vol+</div>
+                <div class="test-button" onclick="sendConsumer(0xEA)">🔉 Vol-</div>
+                <div class="test-button" onclick="sendConsumer(0xE2)">🔇 Mute</div>
+                <div class="test-button" onclick="sendConsumer(0xCD)">▶️ Play</div>
+                <div class="test-button" onclick="sendConsumer(0xB5)">⏭️ Next</div>
+                <div class="test-button" onclick="sendConsumer(0xB6)">⏮️ Prev</div>
             </div>
         </div>
 
         <!-- Device Control -->
         <div class="card">
-            <h2>ðŸŽ›ï¸ Device Control</h2>
+            <h2>🎛️ Device Control</h2>
             <button onclick="sendControl('force_adv')" class="success">Start Advertising</button>
             <button onclick="sendControl('quiet')" class="secondary">Stop Advertising</button>
             <button onclick="sendControl('forget')" class="danger">Clear Bonding</button>
@@ -591,7 +595,7 @@
 
         <!-- Log -->
         <div class="card">
-            <h2>ðŸ“ Log</h2>
+            <h2>📝 Log</h2>
             <div class="log-container" id="logContainer"></div>
             <button onclick="clearLog()" class="secondary" style="margin-top: 12px;">Clear Log</button>
         </div>
@@ -715,7 +719,7 @@
                 setScanStatus('Scanning for nearby networks...');
             } else {
                 button.disabled = false;
-                button.textContent = 'ðŸ” Scan';
+                button.textContent = '🔍 Scan';
             }
         }
 
@@ -978,7 +982,7 @@
 
                     const signal = document.createElement('div');
                     signal.className = 'wifi-signal';
-                    signal.innerHTML = `<span class="signal-strength">ðŸ“¶</span>${network.channel}`;
+                    signal.innerHTML = `<span class="signal-strength">📶</span>${network.channel}`;
 
                     const content = document.createElement('div');
                     content.style.display = 'flex';
@@ -1232,6 +1236,18 @@
             }
 
             sendKeyboardText(text);
+        }
+
+        async function testKeyboardSequence() {
+            log('Testing keyboard sequence', 'info');
+
+            const sequence = [0x04, 0x05, 0x06, 0x2C, 0x1E, 0x1F, 0x20];
+            for (const code of sequence) {
+                pressKey(code);
+                await new Promise((resolve) => setTimeout(resolve, 150));
+            }
+
+            log('Keyboard sequence test complete', 'success');
         }
 
         function sendConsumer(usage) {
