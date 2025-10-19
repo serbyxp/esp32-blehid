@@ -268,6 +268,15 @@ static void on_consumer_input(const consumer_state_t *state)
 
     consumer_state_t normalized = *state;
 
+    uint16_t raw_usage = normalized.usage;
+    uint16_t usage_mask = ble_hid_consumer_usage_to_mask(raw_usage);
+    if (raw_usage != 0 && usage_mask == 0)
+    {
+        ESP_LOGW(TAG, "Unsupported consumer usage request: 0x%04X", raw_usage);
+        return;
+    }
+    normalized.usage = usage_mask;
+
     if (normalized.active && normalized.usage == 0)
     {
         return;

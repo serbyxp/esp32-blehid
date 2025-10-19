@@ -242,18 +242,23 @@ esp_err_t hid_device_notify_consumer(hid_device_t *device)
     }
 
     bool sending_release = device->state.consumer_pending_release;
-    uint16_t usage = 0;
+    uint16_t report_mask = 0;
 
-    if (sending_release)
+    if (!sending_release && device->state.consumer.active)
     {
-        usage = 0;
-    }
-    else
-    {
-        usage = device->state.consumer.active ? device->state.consumer.usage : 0;
+        uint16_t requested = device->state.consumer.usage;
+        report_mask = ble_hid_consumer_usage_to_mask(requested);
+
+        if (requested != 0 && report_mask == 0)
+        {
+            ESP_LOGW(TAG, "Ignoring unsupported consumer usage: 0x%04X", requested);
+            device->state.consumer_updated = false;
+            device->state.consumer_pending_release = false;
+            return ESP_OK;
+        }
     }
 
-    esp_err_t err = ble_hid_notify_consumer(usage);
+    esp_err_t err = ble_hid_notify_consumer(report_mask);
     if (err != ESP_OK)
     {
         return err;

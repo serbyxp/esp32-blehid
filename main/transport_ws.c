@@ -3,6 +3,7 @@
 #include "esp_http_server.h"
 #include "http_server.h"
 #include "hid_keymap.h"
+#include "ble_hid.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -243,7 +244,21 @@ static void process_ws_message(const char *data, size_t len)
             {
                 value = 0xFFFF;
             }
-            state.usage = (uint16_t)value;
+
+            uint16_t raw_usage = (uint16_t)value;
+            uint16_t mask = ble_hid_consumer_usage_to_mask(raw_usage);
+
+            if (raw_usage != 0 && mask == 0)
+            {
+                ESP_LOGW(TAG, "Unsupported consumer usage from WS: 0x%04X", raw_usage);
+                state.active = false;
+                state.hold = false;
+                state.usage = 0;
+            }
+            else
+            {
+                state.usage = mask;
+            }
         }
 
         if (pressed_item)
