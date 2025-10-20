@@ -13,6 +13,7 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "store/config/ble_store_config.h"
 #include "nvs_keystore.h"
+#include "mouse_report_builder.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -23,7 +24,7 @@ static const char *TAG = "BLE_HID";
 
 // Combined HID Report Descriptor (Mouse + Keyboard + Consumer)
 static const uint8_t hid_report_map[] = {
-    // Mouse (Report ID 1) — matches tmp_composite_example.py
+    // Mouse (Report ID 1) — five buttons with vertical & horizontal scroll
     0x05, 0x01,        // Usage Page (Generic Desktop)
     0x09, 0x02,        // Usage (Mouse)
     0xA1, 0x01,        // Collection (Application)
@@ -32,14 +33,14 @@ static const uint8_t hid_report_map[] = {
     0xA1, 0x00,        //   Collection (Physical)
     0x05, 0x09,        //     Usage Page (Buttons)
     0x19, 0x01,        //     Usage Minimum (Button 1)
-    0x29, 0x03,        //     Usage Maximum (Button 3)
+    0x29, 0x05,        //     Usage Maximum (Button 5)
     0x15, 0x00,        //     Logical Minimum (0)
     0x25, 0x01,        //     Logical Maximum (1)
-    0x95, 0x03,        //     Report Count (3)
+    0x95, 0x05,        //     Report Count (5)
     0x75, 0x01,        //     Report Size (1)
     0x81, 0x02,        //     Input (Data, Variable, Absolute)
     0x95, 0x01,        //     Report Count (1) - padding
-    0x75, 0x05,        //     Report Size (5)
+    0x75, 0x03,        //     Report Size (3)
     0x81, 0x03,        //     Input (Constant, Variable, Absolute)
     0x05, 0x01,        //     Usage Page (Generic Desktop)
     0x09, 0x30,        //     Usage (X)
@@ -49,6 +50,13 @@ static const uint8_t hid_report_map[] = {
     0x25, 0x7F,        //     Logical Maximum (127)
     0x75, 0x08,        //     Report Size (8)
     0x95, 0x03,        //     Report Count (3)
+    0x81, 0x06,        //     Input (Data, Variable, Relative)
+    0x05, 0x0C,        //     Usage Page (Consumer)
+    0x0A, 0x38, 0x02,  //     Usage (AC Pan) - horizontal scroll
+    0x15, 0x81,        //     Logical Minimum (-127)
+    0x25, 0x7F,        //     Logical Maximum (127)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x01,        //     Report Count (1)
     0x81, 0x06,        //     Input (Data, Variable, Relative)
     0xC0,              //   End Collection
     0xC0,              // End Collection
@@ -167,7 +175,7 @@ static char s_device_name[32] = "ESP32 HID";
 static uint8_t s_adv_handle = 0;
 
 // Report storage
-static uint8_t s_mouse_report[5] = {0};
+static uint8_t s_mouse_report[HID_MOUSE_REPORT_LEN] = {0};
 static uint8_t s_keyboard_report[9] = {0};
 static uint16_t s_consumer_report = 0;
 static uint8_t s_boot_mouse_report[3] = {0};
@@ -955,11 +963,7 @@ esp_err_t ble_hid_notify_mouse(const mouse_state_t *state)
     }
 
     // Update report storage
-    s_mouse_report[0] = 0x01;           // Report ID
-    s_mouse_report[1] = state->buttons & 0x07;
-    s_mouse_report[2] = (int8_t)state->x;  // Cast to ensure sign extension
-    s_mouse_report[3] = (int8_t)state->y;
-    s_mouse_report[4] = (int8_t)state->wheel;
+    mouse_build_report(state, s_mouse_report);
 
     // Boot report (no Report ID)
     s_boot_mouse_report[0] = state->buttons & 0x07;

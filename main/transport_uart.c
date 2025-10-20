@@ -152,6 +152,7 @@ static void process_message(const char *line)
         cJSON *dx = cJSON_GetObjectItem(json, "dx");
         cJSON *dy = cJSON_GetObjectItem(json, "dy");
         cJSON *wheel = cJSON_GetObjectItem(json, "wheel");
+        cJSON *hwheel = cJSON_GetObjectItem(json, "hwheel");
         cJSON *buttons = cJSON_GetObjectItem(json, "buttons");
 
         if (dx && cJSON_IsNumber(dx))
@@ -160,12 +161,16 @@ static void process_message(const char *line)
             state.y = (int8_t)dy->valueint;
         if (wheel && cJSON_IsNumber(wheel))
             state.wheel = (int8_t)wheel->valueint;
+        if (hwheel && cJSON_IsNumber(hwheel))
+            state.hwheel = (int8_t)hwheel->valueint;
 
         if (buttons && cJSON_IsObject(buttons))
         {
             cJSON *left = cJSON_GetObjectItem(buttons, "left");
             cJSON *right = cJSON_GetObjectItem(buttons, "right");
             cJSON *middle = cJSON_GetObjectItem(buttons, "middle");
+            cJSON *back = cJSON_GetObjectItem(buttons, "back");
+            cJSON *forward = cJSON_GetObjectItem(buttons, "forward");
 
             state.buttons = 0;
             if (left && cJSON_IsTrue(left))
@@ -174,6 +179,10 @@ static void process_message(const char *line)
                 state.buttons |= 0x02;
             if (middle && cJSON_IsTrue(middle))
                 state.buttons |= 0x04;
+            if (back && cJSON_IsTrue(back))
+                state.buttons |= 0x08;
+            if (forward && cJSON_IsTrue(forward))
+                state.buttons |= 0x10;
         }
 
         s_callbacks.on_mouse(&state);

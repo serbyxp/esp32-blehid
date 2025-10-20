@@ -401,10 +401,20 @@
                     ontouchstart="setMouseButton('right', true)" ontouchend="setMouseButton('right', false)">
                     Right Click
                 </button>
+                <button onmousedown="setMouseButton('back', true)" onmouseup="setMouseButton('back', false)"
+                    ontouchstart="setMouseButton('back', true)" ontouchend="setMouseButton('back', false)">
+                    Back Button
+                </button>
+                <button onmousedown="setMouseButton('forward', true)" onmouseup="setMouseButton('forward', false)"
+                    ontouchstart="setMouseButton('forward', true)" ontouchend="setMouseButton('forward', false)">
+                    Forward Button
+                </button>
             </div>
             <div style="margin-top: 16px;">
                 <button onclick="scrollWheel(1)">↑ Scroll Up</button>
                 <button onclick="scrollWheel(-1)">↓ Scroll Down</button>
+                <button onclick="scrollHWheel(-1)">← Scroll Left</button>
+                <button onclick="scrollHWheel(1)">→ Scroll Right</button>
                 <button onclick="testMouseCircle()">Test: Circle Motion</button>
                 <button onclick="testMouseClick()">Test: Click Sequence</button>
             </div>
@@ -499,7 +509,7 @@
         // State
         let ws = null;
         let stats = { messages: 0, mouse: 0, keyboard: 0, consumer: 0 };
-        let mouseState = { buttons: { left: false, right: false, middle: false } };
+        let mouseState = { buttons: { left: false, right: false, middle: false, back: false, forward: false } };
         let testRunning = false;
 
         // Logging
@@ -619,12 +629,13 @@
         }
 
         // Mouse Control
-        function sendMouse(dx, dy, wheel = 0) {
+        function sendMouse(dx, dy, wheel = 0, hwheel = 0) {
             if (sendMessage({
                 type: 'mouse',
                 dx: dx,
                 dy: dy,
                 wheel: wheel,
+                hwheel: hwheel,
                 buttons: mouseState.buttons
             })) {
                 stats.mouse++;
@@ -634,13 +645,18 @@
 
         function setMouseButton(button, pressed) {
             mouseState.buttons[button] = pressed;
-            sendMouse(0, 0, 0);
+            sendMouse(0, 0, 0, 0);
             log(`Mouse ${button} button ${pressed ? 'pressed' : 'released'}`, 'info');
         }
 
         function scrollWheel(delta) {
             sendMouse(0, 0, delta);
             log(`Scroll wheel: ${delta}`, 'info');
+        }
+
+        function scrollHWheel(delta) {
+            sendMouse(0, 0, 0, delta);
+            log(`Horizontal scroll: ${delta}`, 'info');
         }
 
         // Mouse pad interaction

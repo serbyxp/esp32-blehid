@@ -17,17 +17,31 @@ from ascii_hid_table import HID_ASCII_TABLE, HID_KEYMAP_LEFT_SHIFT, HID_KEYMAP_S
 class HIDClient:
     """Base HID client interface"""
     
-    def send_mouse(self, dx=0, dy=0, wheel=0, left=False, right=False, middle=False):
+    def send_mouse(
+        self,
+        dx=0,
+        dy=0,
+        wheel=0,
+        hwheel=0,
+        left=False,
+        right=False,
+        middle=False,
+        back=False,
+        forward=False,
+    ):
         """Send mouse movement and button state"""
         msg = {
             "type": "mouse",
             "dx": dx,
             "dy": dy,
             "wheel": wheel,
+            "hwheel": hwheel,
             "buttons": {
                 "left": left,
                 "right": right,
-                "middle": middle
+                "middle": middle,
+                "back": back,
+                "forward": forward,
             }
         }
         self._send(msg)

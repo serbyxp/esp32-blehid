@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "hid_device.c"
         "ble_hid.c"
+        "mouse_report_builder.c"
         "transport_uart.c"
         "transport_ws.c"
         "ws_ascii.c"
