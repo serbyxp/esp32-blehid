@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+#include "hid_keyboard.h"
 
 // Device states
 typedef enum
@@ -22,14 +23,6 @@ typedef struct
     int8_t wheel;
     uint8_t buttons; // bits: 0=left, 1=right, 2=middle
 } mouse_state_t;
-
-// Keyboard state
-typedef struct
-{
-    uint8_t modifiers;
-    uint8_t reserved;
-    uint8_t keys[6];
-} keyboard_state_t;
 
 typedef struct
 {
