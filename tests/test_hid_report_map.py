@@ -1,4 +1,8 @@
+import ctypes
 import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -116,6 +120,87 @@ class HidReportMapTest(unittest.TestCase):
         ]
         self.assertListEqual(ids, [1, 2, 3])
 
+
+class ConsumerUsageMaskTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.source_text = BLE_HID_C.read_text(encoding="utf-8")
+        cls.consumer_usages = _extract_hex_values(
+            cls.source_text, r"s_consumer_usages\[]\s*=\s*\{([^}]*)\}"
+        )
+
+        array_src = re.search(
+            r"static const uint16_t s_consumer_usages\[] = \{[^}]*\};",
+            cls.source_text,
+            re.DOTALL,
+        )
+        if array_src is None:
+            raise AssertionError("Failed to locate consumer usage table")
+
+        func_src = re.search(
+            r"uint16_t\s+ble_hid_consumer_usage_to_mask\(uint16_t usage\)\s*\{.*?\n\}",
+            cls.source_text,
+            re.DOTALL,
+        )
+        if func_src is None:
+            raise AssertionError("Failed to locate consumer usage helper")
+
+        helper_code = textwrap.dedent(
+            """
+            #include <stdint.h>
+            #include <stddef.h>
+            {array}
+            {function}
+            """
+        ).format(array=array_src.group(0), function=func_src.group(0))
+
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        c_path = Path(cls._tmpdir.name) / "consumer_mask.c"
+        so_path = Path(cls._tmpdir.name) / "consumer_mask.so"
+        c_path.write_text(helper_code, encoding="utf-8")
+
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", str(c_path), "-o", str(so_path)],
+            check=True,
+            capture_output=True,
+        )
+
+        cls.lib = ctypes.CDLL(str(so_path))
+        cls.lib.ble_hid_consumer_usage_to_mask.argtypes = [ctypes.c_uint16]
+        cls.lib.ble_hid_consumer_usage_to_mask.restype = ctypes.c_uint16
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmpdir.cleanup()
+
+    def _assert_usage_maps_to_expected_bit(self, usage: int) -> None:
+        try:
+            index = self.consumer_usages.index(usage)
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise AssertionError(f"Usage 0x{usage:04X} not present in descriptor") from exc
+
+        mask = self.lib.ble_hid_consumer_usage_to_mask(usage)
+        expected_mask = 1 << index
+        self.assertEqual(mask, expected_mask)
+
+        low_byte = mask & 0xFF
+        high_byte = (mask >> 8) & 0xFF
+
+        if index < 8:
+            self.assertNotEqual(low_byte, 0)
+            self.assertEqual(high_byte, 0)
+        else:
+            self.assertEqual(low_byte, 0)
+            self.assertNotEqual(high_byte, 0)
+
+    def test_volume_up_maps_to_low_byte_bit(self) -> None:
+        self._assert_usage_maps_to_expected_bit(0x00E9)
+
+    def test_play_pause_maps_to_low_byte_bit(self) -> None:
+        self._assert_usage_maps_to_expected_bit(0x00CD)
+
+    def test_mail_maps_to_high_byte_bit(self) -> None:
+        self._assert_usage_maps_to_expected_bit(0x018A)
 
 if __name__ == "__main__":
     unittest.main()

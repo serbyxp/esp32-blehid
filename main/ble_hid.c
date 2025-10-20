@@ -319,8 +319,8 @@ static int consumer_report_access(uint16_t conn_handle, uint16_t attr_handle,
     {
         // Keep the readback order consistent with the notification payload
         uint8_t report[2] = {
-            (uint8_t)((s_consumer_report >> 8) & 0xFF),
-            (uint8_t)(s_consumer_report & 0xFF)
+            (uint8_t)(s_consumer_report & 0xFF),
+            (uint8_t)((s_consumer_report >> 8) & 0xFF)
         };
         return os_mbuf_append(ctxt->om, report, sizeof(report));
     }
@@ -1088,9 +1088,8 @@ esp_err_t ble_hid_notify_consumer(uint16_t usage_mask)
 
     uint8_t report[3];
     report[0] = 0x03; // Report ID
-    // Send high byte first so the bit positions match host expectations (notably iOS)
-    report[1] = (report_mask >> 8) & 0xFF;
-    report[2] = report_mask & 0xFF;
+    report[1] = report_mask & 0xFF;
+    report[2] = (report_mask >> 8) & 0xFF;
 
     struct os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
     if (!om)
