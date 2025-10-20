@@ -31,6 +31,7 @@ static struct
     consumer_state_t consumer;
     bool mouse_hold;
     bool wheel_hold;
+    bool hwheel_hold;
 } g_remote_state = {0};
 
 static void populate_wifi_status_json(cJSON *obj)
@@ -218,6 +219,12 @@ static void on_mouse_input(const mouse_state_t *state)
     if (state->wheel != g_remote_state.mouse.wheel)
     {
         g_remote_state.mouse.wheel = state->wheel;
+        changed = true;
+    }
+
+    if (state->hwheel != g_remote_state.mouse.hwheel)
+    {
+        g_remote_state.mouse.hwheel = state->hwheel;
         changed = true;
     }
 
@@ -521,12 +528,18 @@ static void notify_timer_callback(TimerHandle_t timer)
     if (!g_remote_state.wheel_hold && g_remote_state.mouse.wheel != 0)
     {
         g_remote_state.mouse.wheel = 0;
-        hid_device_set_mouse_state(g_device, &g_remote_state.mouse);
+        updated = true;
+    }
+
+    if (!g_remote_state.hwheel_hold && g_remote_state.mouse.hwheel != 0)
+    {
+        g_remote_state.mouse.hwheel = 0;
         updated = true;
     }
 
     if (updated)
     {
+        hid_device_set_mouse_state(g_device, &g_remote_state.mouse);
         hid_device_request_notify(g_device, true, false, false);
     }
 }

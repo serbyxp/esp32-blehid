@@ -21,7 +21,8 @@ typedef struct
     int8_t x;
     int8_t y;
     int8_t wheel;
-    uint8_t buttons; // bits: 0=left, 1=right, 2=middle
+    int8_t hwheel;
+    uint8_t buttons; // bits: 0=left, 1=right, 2=middle, 3=back, 4=forward
 } mouse_state_t;
 
 typedef struct
