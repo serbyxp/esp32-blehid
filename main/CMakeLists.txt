@@ -5,6 +5,7 @@ idf_component_register(
         "ble_hid.c"
         "transport_uart.c"
         "transport_ws.c"
+        "ws_ascii.c"
         "wifi_manager.c"
         "nvs_keystore.c"
         "http_server.c"

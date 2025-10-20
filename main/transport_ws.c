@@ -2,7 +2,7 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "http_server.h"
-#include "hid_keymap.h"
+#include "ws_ascii.h"
 #include "ble_hid.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -36,8 +36,7 @@ static void process_ws_message(const char *data, size_t len);
 static void register_client(int fd);
 static void unregister_client(int fd);
 static int httpd_req_to_client_fd(httpd_req_t *req);
-static void ws_send_keyboard_press(uint8_t keycode, uint8_t modifiers);
-static void ws_send_keyboard_release(void);
+static void ws_send_keyboard_state(const keyboard_state_t *state);
 static void ws_send_ascii_char(uint8_t ascii);
 static void ws_send_ascii_text(const char *text);
 static void ws_ascii_task(void *arg);
@@ -281,28 +280,27 @@ static void process_ws_message(const char *data, size_t len)
     cJSON_Delete(json);
 }
 
-static void ws_send_keyboard_press(uint8_t keycode, uint8_t modifiers)
+static void ws_send_keyboard_state(const keyboard_state_t *state)
 {
-    if (!s_callbacks.on_keyboard)
+    if (!s_callbacks.on_keyboard || !state)
     {
         return;
     }
 
-    keyboard_state_t state = {0};
-    state.modifiers = modifiers;
-    state.keys[0] = keycode;
-    s_callbacks.on_keyboard(&state);
+    s_callbacks.on_keyboard(state);
 }
 
-static void ws_send_keyboard_release(void)
+static void ws_emit_ascii_reports(const keyboard_state_t reports[WS_ASCII_REPORT_COUNT])
 {
-    if (!s_callbacks.on_keyboard)
+    if (!reports)
     {
         return;
     }
 
-    keyboard_state_t state = {0};
-    s_callbacks.on_keyboard(&state);
+    ws_send_keyboard_state(&reports[0]);
+    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS));
+    ws_send_keyboard_state(&reports[1]);
+    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS));
 }
 
 static void ws_send_ascii_char(uint8_t ascii)
@@ -322,18 +320,14 @@ static void ws_send_ascii_char(uint8_t ascii)
         return;
     }
 
-    uint8_t keycode = 0;
-    uint8_t modifiers = 0;
-    if (!hid_keymap_from_ascii(ascii, &keycode, &modifiers))
+    keyboard_state_t reports[WS_ASCII_REPORT_COUNT] = {0};
+    if (!ws_ascii_prepare_reports(ascii, reports))
     {
         ESP_LOGW(TAG, "Unsupported ASCII character: %u", ascii);
         return;
     }
 
-    ws_send_keyboard_press(keycode, modifiers);
-    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS));
-    ws_send_keyboard_release();
-    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS));
+    ws_emit_ascii_reports(reports);
 }
 
 static void ws_send_ascii_text(const char *text)
@@ -370,18 +364,14 @@ static void ws_ascii_task(void *arg)
             continue;
         }
 
-        uint8_t keycode = 0;
-        uint8_t modifiers = 0;
-        if (!hid_keymap_from_ascii((uint8_t)ascii, &keycode, &modifiers))
+        keyboard_state_t reports[WS_ASCII_REPORT_COUNT] = {0};
+        if (!ws_ascii_prepare_reports((uint8_t)ascii, reports))
         {
             ESP_LOGW(TAG, "Unsupported ASCII character: %u", ascii);
             continue;
         }
 
-        ws_send_keyboard_press(keycode, modifiers);
-        vTaskDelay(pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS));
-        ws_send_keyboard_release();
-        vTaskDelay(pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS));
+        ws_emit_ascii_reports(reports);
     }
 
     s_ascii_task = NULL;

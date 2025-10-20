@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "hid_device.h"
+#include "hid_keyboard.h"
 
 #define HID_KEYMAP_SHIFT 0x80
 #define HID_KEYMAP_LEFT_SHIFT 0x02
