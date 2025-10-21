@@ -202,7 +202,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     }
     else if (event_base == WIFI_MANAGER_EVENT && event_id == WIFI_MANAGER_EVENT_RETRY_CONNECT)
     {
-        if (s_current_mode != WIFI_MODE_STA)
+        if (s_current_mode != WIFI_MODE_STA && s_current_mode != WIFI_MODE_APSTA)
         {
             ESP_LOGI(TAG, "Retry skipped because STA is not active");
             return;
