@@ -275,8 +275,8 @@ static void on_mouse_input(const mouse_state_t *state)
     uint8_t hid_report[HID_MOUSE_REPORT_LEN] = {0};
     mouse_build_report(state, hid_report);
 
-    int8_t report_y = (int8_t)hid_report[2];
-    int8_t report_x = (int8_t)hid_report[3];
+    int8_t report_x = (int8_t)hid_report[2];
+    int8_t report_y = (int8_t)hid_report[3];
     uint8_t masked_buttons = state->buttons & HID_MOUSE_BUTTON_MASK;
     uint8_t report_buttons = hid_report[1] & HID_MOUSE_BUTTON_MASK;
 
