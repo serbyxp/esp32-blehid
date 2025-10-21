@@ -19,6 +19,8 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <inttypes.h>
+#include <stdint.h>
 
 void ble_store_config_init(void);
 
@@ -188,8 +190,72 @@ static uint8_t s_protocol_mode = 1; // Report protocol
 static uint8_t s_hid_control = 0;
 
 // Notification retry configuration
-#define HID_NOTIFY_MAX_ATTEMPTS 3
-#define HID_NOTIFY_RETRY_DELAY_MS 10
+#define HID_NOTIFY_MAX_ATTEMPTS 6
+#define HID_NOTIFY_RETRY_BASE_DELAY_MS 10
+#define HID_NOTIFY_RETRY_MAX_DELAY_MS 160
+
+// ENOMEM metrics tracking
+typedef struct
+{
+    uint16_t handle;
+    uint32_t count;
+} hid_enomem_metric_t;
+
+static hid_enomem_metric_t s_enomem_metrics[12];
+static size_t s_enomem_metric_count = 0;
+static portMUX_TYPE s_enomem_metrics_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static uint32_t hid_notify_calculate_delay_ms(int attempt)
+{
+    uint32_t delay = HID_NOTIFY_RETRY_BASE_DELAY_MS << attempt;
+    if (delay > HID_NOTIFY_RETRY_MAX_DELAY_MS)
+    {
+        delay = HID_NOTIFY_RETRY_MAX_DELAY_MS;
+    }
+    return delay;
+}
+
+static void hid_notify_record_enomem(uint16_t attr_handle, int attempt, const char *stage)
+{
+    uint32_t count = 0;
+
+    portENTER_CRITICAL(&s_enomem_metrics_lock);
+    size_t index = SIZE_MAX;
+    for (size_t i = 0; i < s_enomem_metric_count; ++i)
+    {
+        if (s_enomem_metrics[i].handle == attr_handle)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if (index == SIZE_MAX)
+    {
+        if (s_enomem_metric_count < (sizeof(s_enomem_metrics) / sizeof(s_enomem_metrics[0])))
+        {
+            index = s_enomem_metric_count++;
+        }
+        else
+        {
+            // Re-use the last slot if we run out of dedicated metric entries.
+            index = s_enomem_metric_count - 1;
+        }
+        s_enomem_metrics[index].handle = attr_handle;
+        s_enomem_metrics[index].count = 0;
+    }
+
+    s_enomem_metrics[index].count++;
+    count = s_enomem_metrics[index].count;
+    portEXIT_CRITICAL(&s_enomem_metrics_lock);
+
+    ESP_LOGW(TAG,
+             "Notify ENOMEM (handle=0x%04X, attempt=%d, stage=%s, total=%" PRIu32 ")",
+             attr_handle,
+             attempt + 1,
+             stage,
+             count);
+}
 
 // Forward declarations
 static int ble_hid_gap_event(struct ble_gap_event *event, void *arg);
@@ -203,7 +269,11 @@ static esp_err_t ble_hid_send_notification(uint16_t attr_handle, const uint8_t *
         struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
         if (!om)
         {
-            vTaskDelay(pdMS_TO_TICKS(HID_NOTIFY_RETRY_DELAY_MS));
+            hid_notify_record_enomem(attr_handle, attempt, "alloc");
+            if (attempt < HID_NOTIFY_MAX_ATTEMPTS - 1)
+            {
+                vTaskDelay(pdMS_TO_TICKS(hid_notify_calculate_delay_ms(attempt)));
+            }
             continue;
         }
 
@@ -217,7 +287,11 @@ static esp_err_t ble_hid_send_notification(uint16_t attr_handle, const uint8_t *
 
         if (rc == BLE_HS_ENOMEM)
         {
-            vTaskDelay(pdMS_TO_TICKS(HID_NOTIFY_RETRY_DELAY_MS));
+            hid_notify_record_enomem(attr_handle, attempt, "notify");
+            if (attempt < HID_NOTIFY_MAX_ATTEMPTS - 1)
+            {
+                vTaskDelay(pdMS_TO_TICKS(hid_notify_calculate_delay_ms(attempt)));
+            }
             continue;
         }
 
@@ -225,7 +299,10 @@ static esp_err_t ble_hid_send_notification(uint16_t attr_handle, const uint8_t *
         return ESP_FAIL;
     }
 
-    ESP_LOGW(TAG, "Notify failed: out of memory (handle=0x%04X)", attr_handle);
+    ESP_LOGW(TAG,
+             "Notify failed: out of memory after %d attempts (handle=0x%04X)",
+             HID_NOTIFY_MAX_ATTEMPTS,
+             attr_handle);
     return ESP_ERR_NO_MEM;
 }
 
