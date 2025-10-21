@@ -809,13 +809,14 @@ esp_err_t wifi_manager_get_ip(char *ip_str, size_t len)
 
     esp_netif_t *netif = NULL;
 
-    if (s_current_mode == WIFI_MODE_STA && s_wifi_connected)
+    if ((s_current_mode == WIFI_MODE_STA || s_current_mode == WIFI_MODE_APSTA) && s_wifi_connected)
     {
-        netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        netif = s_sta_netif ? s_sta_netif : esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     }
-    else if (s_current_mode == WIFI_MODE_AP || s_current_mode == WIFI_MODE_APSTA)
+
+    if (!netif && (s_current_mode == WIFI_MODE_AP || s_current_mode == WIFI_MODE_APSTA))
     {
-        netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        netif = s_ap_netif ? s_ap_netif : esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
     }
 
     if (!netif)
@@ -824,7 +825,11 @@ esp_err_t wifi_manager_get_ip(char *ip_str, size_t len)
     }
 
     esp_netif_ip_info_t ip_info;
-    ESP_ERROR_CHECK(esp_netif_get_ip_info(netif, &ip_info));
+    esp_err_t err = esp_netif_get_ip_info(netif, &ip_info);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
 
     snprintf(ip_str, len, IPSTR, IP2STR(&ip_info.ip));
     return ESP_OK;
@@ -856,7 +861,31 @@ esp_err_t wifi_manager_get_sta_info(wifi_manager_sta_info_t *info)
                 memcpy(info->bssid, ap_info.bssid, 6);
             }
 
-            wifi_manager_get_ip(info->ip, sizeof(info->ip));
+            esp_netif_t *sta_netif = s_sta_netif ? s_sta_netif : esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            bool ip_set = false;
+
+            if (sta_netif)
+            {
+                esp_netif_ip_info_t ip_info;
+                if (esp_netif_get_ip_info(sta_netif, &ip_info) == ESP_OK)
+                {
+                    snprintf(info->ip, sizeof(info->ip), IPSTR, IP2STR(&ip_info.ip));
+                    ip_set = true;
+                }
+            }
+
+            if (!ip_set)
+            {
+                esp_netif_t *fallback_netif = s_ap_netif ? s_ap_netif : esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+                if (fallback_netif)
+                {
+                    esp_netif_ip_info_t ip_info;
+                    if (esp_netif_get_ip_info(fallback_netif, &ip_info) == ESP_OK)
+                    {
+                        snprintf(info->ip, sizeof(info->ip), IPSTR, IP2STR(&ip_info.ip));
+                    }
+                }
+            }
         }
     }
 
