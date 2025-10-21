@@ -17,6 +17,8 @@ class KeyboardState(ctypes.Structure):
 
 
 class WsAsciiSequenceTest(unittest.TestCase):
+    MAX_REPORTS_PER_CHAR = 4
+
     @classmethod
     def setUpClass(cls) -> None:
         cls._lib = cls._build_test_library()
@@ -27,6 +29,12 @@ class WsAsciiSequenceTest(unittest.TestCase):
             ctypes.c_size_t,
         ]
         cls._lib.ws_ascii_build_sequence.restype = ctypes.c_size_t
+        cls._lib.ws_ascii_build_char.argtypes = [
+            ctypes.c_uint8,
+            ctypes.POINTER(KeyboardState),
+            ctypes.c_size_t,
+        ]
+        cls._lib.ws_ascii_build_char.restype = ctypes.c_size_t
 
     @staticmethod
     def _build_test_library() -> ctypes.CDLL:
@@ -48,11 +56,83 @@ class WsAsciiSequenceTest(unittest.TestCase):
             subprocess.check_call(compile_cmd, cwd=PROJECT_ROOT)
             return ctypes.CDLL(str(library_path))
 
-    def _build_sequence(self, text: str) -> list[int]:
+    def _build_char_reports(self, ch: str) -> list[KeyboardState]:
+        ascii_value = ord(ch)
+        state_array_type = KeyboardState * self.MAX_REPORTS_PER_CHAR
+        state_buffer = state_array_type()
+        count = self._lib.ws_ascii_build_char(
+            ctypes.c_uint8(ascii_value),
+            state_buffer,
+            self.MAX_REPORTS_PER_CHAR,
+        )
+        return [state_buffer[i] for i in range(count)]
+
+    def _build_sequence(self, text: str) -> list[KeyboardState]:
+        reports: list[KeyboardState] = []
+        for ch in text:
+            reports.extend(self._build_char_reports(ch))
+        return reports
+
+    def test_mixed_case_string_releases_modifiers_before_digits(self) -> None:
+        text = "Hello from ESP32!"
+        char_reports = [self._build_char_reports(ch) for ch in text]
+        flattened = [state for reports in char_reports for state in reports]
+
+        uppercase_letters = [
+            (idx, ch, reports)
+            for idx, (ch, reports) in enumerate(zip(text, char_reports))
+            if ch.isalpha() and ch.isupper()
+        ]
+
+        for index, ch, reports in uppercase_letters:
+            self.assertEqual(
+                len(reports),
+                4,
+                msg=f"Uppercase character {ch!r} should produce four reports",
+            )
+            self.assertEqual(reports[0].modifiers, 0x02)
+            self.assertTrue(all(key == 0 for key in reports[0].keys))
+            self.assertEqual(reports[1].modifiers, 0x02)
+            self.assertNotEqual(reports[1].keys[0], 0)
+            self.assertEqual(reports[2].modifiers, 0x02)
+            self.assertTrue(all(key == 0 for key in reports[2].keys))
+            self.assertEqual(reports[3].modifiers, 0x00)
+            self.assertTrue(all(key == 0 for key in reports[3].keys))
+
+        offsets: list[int] = []
+        total = 0
+        for reports in char_reports:
+            offsets.append(total)
+            total += len(reports)
+
+        for index, ch in enumerate(text):
+            if ch.isdigit():
+                start = offsets[index]
+                if start > 0:
+                    self.assertEqual(
+                        flattened[start - 1].modifiers,
+                        0x00,
+                        msg=f"Digit {ch!r} should follow a cleared modifier report",
+                    )
+
+                for report in char_reports[index]:
+                    self.assertEqual(
+                        report.modifiers,
+                        0x00,
+                        msg=f"Digit {ch!r} should not carry modifiers",
+                    )
+
+        exclamation_reports = char_reports[text.index("!")]
+        self.assertEqual(len(exclamation_reports), 4)
+        self.assertEqual(
+            [report.modifiers for report in exclamation_reports],
+            [0x02, 0x02, 0x02, 0x00],
+        )
+
         encoded = text.encode("ascii")
         text_type = ctypes.c_uint8 * len(encoded)
         text_buffer = text_type(*encoded)
-        capacity = len(encoded) * 2
+        capacity = len(text) * self.MAX_REPORTS_PER_CHAR
         state_array_type = KeyboardState * capacity
         state_buffer = state_array_type()
         count = self._lib.ws_ascii_build_sequence(
@@ -61,55 +141,12 @@ class WsAsciiSequenceTest(unittest.TestCase):
             state_buffer,
             capacity,
         )
-        self.assertEqual(
-            count,
-            capacity,
-            msg="Each character should yield a press and release report",
-        )
-        return [state_buffer[i].modifiers for i in range(count)]
-
-    def test_mixed_case_string_releases_modifiers_before_digits(self) -> None:
-        text = "Hello from ESP32!"
-        modifiers = self._build_sequence(text)
-
-        uppercase_indices = [i for i, ch in enumerate(text) if ch.isalpha() and ch.isupper()]
-        for index in uppercase_indices:
-            press_index = index * 2
-            self.assertEqual(
-                modifiers[press_index],
-                0x02,
-                msg=f"Uppercase character {text[index]!r} should set the shift modifier",
-            )
-            self.assertEqual(
-                modifiers[press_index + 1],
-                0x00,
-                msg=f"Uppercase character {text[index]!r} must release the modifier",
-            )
-
-        digit_indices = [i for i, ch in enumerate(text) if ch.isdigit()]
-        for index in digit_indices:
-            press_index = index * 2
-            self.assertEqual(
-                modifiers[press_index - 1],
-                0x00,
-                msg=f"Digit {text[index]!r} should be preceded by a modifier release",
-            )
-            self.assertEqual(
-                modifiers[press_index],
-                0x00,
-                msg=f"Digit {text[index]!r} should not require modifiers",
-            )
-            self.assertEqual(
-                modifiers[press_index + 1],
-                0x00,
-                msg=f"Digit {text[index]!r} must end with a zeroed report",
-            )
-
-        # Sanity check for punctuation that requires modifiers ("!").
-        exclamation_index = text.index("!")
-        press_index = exclamation_index * 2
-        self.assertEqual(modifiers[press_index], 0x02)
-        self.assertEqual(modifiers[press_index + 1], 0x00)
+        self.assertEqual(count, len(flattened))
+        for idx in range(count):
+            expected = flattened[idx]
+            observed = state_buffer[idx]
+            self.assertEqual(observed.modifiers, expected.modifiers)
+            self.assertEqual(list(observed.keys), list(expected.keys))
 
 
 if __name__ == "__main__":
