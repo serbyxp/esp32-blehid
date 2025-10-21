@@ -281,7 +281,7 @@ static void process_message(const char *line)
             }
             else
             {
-                state.usage = mask;
+                state.usage = raw_usage;
             }
         }
 

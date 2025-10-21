@@ -73,6 +73,39 @@ static int consumer_mask_to_index(uint16_t mask)
 
 static void log_consumer_usage_mapping(uint16_t usage, uint16_t mask, bool active, bool hold)
 {
+    static bool s_logged_descriptor_order = false;
+    if (!s_logged_descriptor_order)
+    {
+        s_logged_descriptor_order = true;
+        ESP_LOGI(TAG, "Consumer descriptor order (bit -> usage)");
+
+        size_t label_count = sizeof(s_consumer_usage_labels) / sizeof(s_consumer_usage_labels[0]);
+        for (size_t i = 0; i < label_count; ++i)
+        {
+            uint16_t bit_mask = (uint16_t)(1u << i);
+            uint16_t descriptor_usage = ble_hid_consumer_mask_to_usage(bit_mask);
+            const char *label = s_consumer_usage_labels[i];
+
+            if (descriptor_usage == 0)
+            {
+                ESP_LOGW(TAG,
+                         "  bit %2zu -> mask=0x%04X has no descriptor usage (label=%s)",
+                         i,
+                         bit_mask,
+                         label);
+            }
+            else
+            {
+                ESP_LOGI(TAG,
+                         "  bit %2zu -> usage=0x%04X mask=0x%04X (%s)",
+                         i,
+                         descriptor_usage,
+                         bit_mask,
+                         label);
+            }
+        }
+    }
+
     int bit = consumer_mask_to_index(mask);
     const char *label = "Unknown";
 
@@ -82,21 +115,42 @@ static void log_consumer_usage_mapping(uint16_t usage, uint16_t mask, bool activ
     }
     else if (bit >= 0)
     {
-        size_t label_count = sizeof(s_consumer_usage_labels) / sizeof(s_consumer_usage_labels[0]);
-        if ((size_t)bit < label_count)
+        size_t label_total = sizeof(s_consumer_usage_labels) / sizeof(s_consumer_usage_labels[0]);
+        if ((size_t)bit < label_total)
         {
             label = s_consumer_usage_labels[bit];
         }
     }
 
+    uint16_t descriptor_usage = ble_hid_consumer_mask_to_usage(mask);
+    bool matches_descriptor = false;
+    if (mask == 0)
+    {
+        matches_descriptor = (usage == 0);
+    }
+    else if (descriptor_usage != 0)
+    {
+        matches_descriptor = (descriptor_usage == usage);
+    }
+
     ESP_LOGI(TAG,
-             "Consumer usage %s: usage=0x%04X mask=0x%04X bit=%d active=%s hold=%s",
+             "Consumer usage %s: usage=0x%04X mask=0x%04X bit=%d active=%s hold=%s descriptor_usage=0x%04X match=%s",
              label,
              usage,
              mask,
              bit,
              active ? "true" : "false",
-             hold ? "true" : "false");
+             hold ? "true" : "false",
+             descriptor_usage,
+             matches_descriptor ? "yes" : "no");
+
+    if (mask != 0 && descriptor_usage != 0 && descriptor_usage != usage)
+    {
+        ESP_LOGW(TAG,
+                 "Consumer usage mismatch: UI requested 0x%04X but descriptor bit maps to 0x%04X",
+                 usage,
+                 descriptor_usage);
+    }
 }
 
 static void populate_wifi_status_json(cJSON *obj)
