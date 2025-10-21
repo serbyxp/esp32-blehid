@@ -78,26 +78,29 @@ class WsAsciiSequenceTest(unittest.TestCase):
         char_reports = [self._build_char_reports(ch) for ch in text]
         flattened = [state for reports in char_reports for state in reports]
 
-        uppercase_letters = [
-            (idx, ch, reports)
-            for idx, (ch, reports) in enumerate(zip(text, char_reports))
-            if ch.isalpha() and ch.isupper()
+        actual_modifiers = [
+            [state.modifiers for state in reports] for reports in char_reports
         ]
 
-        for index, ch, reports in uppercase_letters:
-            self.assertEqual(
-                len(reports),
-                4,
-                msg=f"Uppercase character {ch!r} should produce four reports",
-            )
-            self.assertEqual(reports[0].modifiers, 0x02)
-            self.assertTrue(all(key == 0 for key in reports[0].keys))
-            self.assertEqual(reports[1].modifiers, 0x02)
-            self.assertNotEqual(reports[1].keys[0], 0)
-            self.assertEqual(reports[2].modifiers, 0x02)
-            self.assertTrue(all(key == 0 for key in reports[2].keys))
-            self.assertEqual(reports[3].modifiers, 0x00)
-            self.assertTrue(all(key == 0 for key in reports[3].keys))
+        expected_modifiers: list[list[int]] = []
+        for ch in text:
+            if (ch.isalpha() and ch.isupper()) or ch in {"!"}:
+                expected_modifiers.append([0x02, 0x02, 0x02, 0x00])
+            else:
+                expected_modifiers.append([0x00, 0x00])
+
+        self.assertEqual(
+            actual_modifiers,
+            expected_modifiers,
+            msg="Modifier transitions should follow the modifier press, combo, key release, and modifier release cadence.",
+        )
+
+        for ch, reports in zip(text, char_reports):
+            if (ch.isalpha() and ch.isupper()) or ch in {"!"}:
+                self.assertTrue(all(key == 0 for key in reports[0].keys))
+                self.assertNotEqual(reports[1].keys[0], 0)
+                self.assertTrue(all(key == 0 for key in reports[2].keys))
+                self.assertTrue(all(key == 0 for key in reports[3].keys))
 
         offsets: list[int] = []
         total = 0
@@ -121,13 +124,6 @@ class WsAsciiSequenceTest(unittest.TestCase):
                         0x00,
                         msg=f"Digit {ch!r} should not carry modifiers",
                     )
-
-        exclamation_reports = char_reports[text.index("!")]
-        self.assertEqual(len(exclamation_reports), 4)
-        self.assertEqual(
-            [report.modifiers for report in exclamation_reports],
-            [0x02, 0x02, 0x02, 0x00],
-        )
 
         encoded = text.encode("ascii")
         text_type = ctypes.c_uint8 * len(encoded)

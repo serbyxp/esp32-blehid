@@ -15,6 +15,7 @@ static const char *TAG = "WS_TRANSPORT";
 
 #define WS_MAX_CLIENTS 4
 #define WS_ASCII_QUEUE_LEN 64
+#define WS_ASCII_COMBO_STAGE_DELAY_MS 8
 #define WS_ASCII_RELEASE_DELAY_MS 12
 #define WS_ASCII_INTERCHAR_DELAY_MS 6
 #define WS_ASCII_SENTINEL 0xFFFF
@@ -306,12 +307,31 @@ static void ws_emit_ascii_reports(const keyboard_state_t *reports, size_t count)
         return;
     }
 
+    bool is_combo_sequence =
+        (count == WS_ASCII_REPORT_COUNT) && (reports[0].modifiers != 0);
+    const TickType_t combo_delays[] = {
+        pdMS_TO_TICKS(WS_ASCII_COMBO_STAGE_DELAY_MS),
+        pdMS_TO_TICKS(WS_ASCII_COMBO_STAGE_DELAY_MS),
+        pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS),
+    };
+
     for (size_t i = 0; i < count; ++i)
     {
         ws_send_keyboard_state(&reports[i]);
 
-        TickType_t delay = (i + 1 < count) ? pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS)
-                                           : pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS);
+        TickType_t delay = pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS);
+        if (i + 1 < count)
+        {
+            if (is_combo_sequence && i < (sizeof(combo_delays) / sizeof(combo_delays[0])))
+            {
+                delay = combo_delays[i];
+            }
+            else
+            {
+                delay = pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS);
+            }
+        }
+
         vTaskDelay(delay);
     }
 }
