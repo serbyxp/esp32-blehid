@@ -12,6 +12,7 @@
 #include "ble_hid.h"
 #include "transport_uart.h"
 #include "transport_ws.h"
+#include "wifi_credentials.h"
 #include "wifi_manager.h"
 #include "http_server.h"
 #include "mouse_report_builder.h"
@@ -557,54 +558,63 @@ static void on_control_message(cJSON *msg)
             const char *ssid = ssid_item->valuestring;
             const char *psk = (psk_item && cJSON_IsString(psk_item)) ? psk_item->valuestring : "";
 
-            esp_err_t err = wifi_manager_save_config(ssid, psk);
-            if (err == ESP_OK)
-            {
-                bool apply = !apply_item || cJSON_IsTrue(apply_item);
-                bool status_changed = false;
-
-                if (apply)
-                {
-                    wifi_manager_stop();
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                    err = wifi_manager_start_sta(ssid, psk);
-                    status_changed = (err == ESP_OK);
-
-                    // Wait a bit for connection
-                    for (int i = 0; err == ESP_OK && i < 80 && !wifi_manager_is_connected(); i++)
-                    {
-                        vTaskDelay(pdMS_TO_TICKS(100));
-                    }
-
-                    if (err == ESP_OK && wifi_manager_is_connected())
-                    {
-                        char ip[16] = {0};
-                        wifi_manager_get_ip(ip, sizeof(ip));
-                        cJSON_AddStringToObject(response, "mode", "sta");
-                        cJSON_AddStringToObject(response, "ip", ip);
-                    }
-                    else
-                    {
-                        // Fallback to AP mode
-                        wifi_manager_stop();
-                        wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-                        cJSON_AddStringToObject(response, "mode", "ap");
-                        cJSON_AddStringToObject(response, "ip", "192.168.4.1");
-                        status_changed = true;
-                    }
-                }
-
-                cJSON_AddBoolToObject(response, "ok", true);
-
-        if (status_changed)
-        {
-            notify_wifi_status();
-        }
-    }
-            else
+            wifi_credentials_error_t cred_err = wifi_credentials_validate(ssid, psk);
+            if (cred_err != WIFI_CREDENTIALS_OK)
             {
                 cJSON_AddBoolToObject(response, "ok", false);
-                cJSON_AddStringToObject(response, "err", "write_failed");
+                cJSON_AddStringToObject(response, "err", wifi_credentials_error_to_string(cred_err));
+            }
+            else
+            {
+                esp_err_t err = wifi_manager_save_config(ssid, psk);
+                if (err == ESP_OK)
+                {
+                    bool apply = !apply_item || cJSON_IsTrue(apply_item);
+                    bool status_changed = false;
+
+                    if (apply)
+                    {
+                        wifi_manager_stop();
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        err = wifi_manager_start_sta(ssid, psk);
+                        status_changed = (err == ESP_OK);
+
+                        // Wait a bit for connection
+                        for (int i = 0; err == ESP_OK && i < 80 && !wifi_manager_is_connected(); i++)
+                        {
+                            vTaskDelay(pdMS_TO_TICKS(100));
+                        }
+
+                        if (err == ESP_OK && wifi_manager_is_connected())
+                        {
+                            char ip[16] = {0};
+                            wifi_manager_get_ip(ip, sizeof(ip));
+                            cJSON_AddStringToObject(response, "mode", "sta");
+                            cJSON_AddStringToObject(response, "ip", ip);
+                        }
+                        else
+                        {
+                            // Fallback to AP mode
+                            wifi_manager_stop();
+                            wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+                            cJSON_AddStringToObject(response, "mode", "ap");
+                            cJSON_AddStringToObject(response, "ip", "192.168.4.1");
+                            status_changed = true;
+                        }
+                    }
+
+                    cJSON_AddBoolToObject(response, "ok", true);
+
+                    if (status_changed)
+                    {
+                        notify_wifi_status();
+                    }
+                }
+                else
+                {
+                    cJSON_AddBoolToObject(response, "ok", false);
+                    cJSON_AddStringToObject(response, "err", "write_failed");
+                }
             }
         }
         else
