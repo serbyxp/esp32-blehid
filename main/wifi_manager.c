@@ -48,6 +48,23 @@ static TimerHandle_t s_sta_retry_timer = NULL;
 
 #define MAX_STA_RETRY 5
 #define STA_RETRY_DELAY_MS 5000
+
+static void stop_sta_retry_timer(void)
+{
+    if (!s_sta_retry_timer)
+    {
+        return;
+    }
+
+    if (xTimerIsTimerActive(s_sta_retry_timer) == pdTRUE)
+    {
+        if (xTimerStop(s_sta_retry_timer, portMAX_DELAY) != pdPASS)
+        {
+            ESP_LOGW(TAG, "Failed to stop STA retry timer");
+        }
+    }
+}
+
 static void stop_wifi_if_running(void)
 {
     esp_err_t err = esp_wifi_stop();
@@ -123,10 +140,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         if (auth_or_config_failure)
         {
             ESP_LOGW(TAG, "Connection failed (reason %d), restoring AP-only mode", event->reason);
-            if (s_sta_retry_timer)
-            {
-                xTimerStop(s_sta_retry_timer, 0);
-            }
+            stop_sta_retry_timer();
             s_sta_retry_count = 0;
             if (wifi_manager_restore_ap_mode() != ESP_OK)
             {
@@ -153,10 +167,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         else
         {
             ESP_LOGW(TAG, "Max retries reached, fallback to AP mode");
-            if (s_sta_retry_timer)
-            {
-                xTimerStop(s_sta_retry_timer, 0);
-            }
+            stop_sta_retry_timer();
             s_sta_retry_count = 0;
             if (wifi_manager_restore_ap_mode() != ESP_OK)
             {
