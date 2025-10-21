@@ -855,37 +855,29 @@ void app_main(void)
         has_saved_config = true;
     }
 
+    bool wifi_status_changed = false;
     if (has_saved_config)
     {
         ESP_LOGI(TAG, "Connecting to saved WiFi: %s", ssid);
 
-        bool ap_started = false;
-        esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-        if (ap_err == ESP_OK)
+        esp_err_t sta_err = wifi_manager_start_sta(ssid, pass);
+        if (sta_err == ESP_OK)
         {
-            ap_started = true;
-            ESP_LOGI(TAG, "AP fallback available: %s", wifi_manager_get_ap_ssid());
+            wifi_status_changed = true;
         }
         else
         {
-            ESP_LOGW(TAG, "Failed to start AP fallback: %s", esp_err_to_name(ap_err));
-        }
-
-        esp_err_t sta_err = wifi_manager_start_sta(ssid, pass);
-        if (sta_err != ESP_OK)
-        {
             ESP_LOGE(TAG, "Failed to start STA with saved config: %s", esp_err_to_name(sta_err));
-            if (!ap_started)
+
+            esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+            if (ap_err == ESP_OK)
             {
-                esp_err_t fallback_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-                if (fallback_err == ESP_OK)
-                {
-                    ESP_LOGI(TAG, "AP mode active after STA start failure: %s", wifi_manager_get_ap_ssid());
-                }
-                else
-                {
-                    ESP_LOGE(TAG, "Failed to start AP mode after STA failure: %s", esp_err_to_name(fallback_err));
-                }
+                ESP_LOGI(TAG, "AP mode active after STA start failure: %s", wifi_manager_get_ap_ssid());
+                wifi_status_changed = true;
+            }
+            else
+            {
+                ESP_LOGE(TAG, "Failed to start AP mode after STA failure: %s", esp_err_to_name(ap_err));
             }
         }
     }
@@ -895,11 +887,17 @@ void app_main(void)
         if (ap_err == ESP_OK)
         {
             ESP_LOGI(TAG, "AP mode active: %s", wifi_manager_get_ap_ssid());
+            wifi_status_changed = true;
         }
         else
         {
             ESP_LOGE(TAG, "Failed to start AP mode: %s", esp_err_to_name(ap_err));
         }
+    }
+
+    if (wifi_status_changed)
+    {
+        notify_wifi_status();
     }
 
     // Initialize transports
