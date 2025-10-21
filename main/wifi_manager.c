@@ -341,19 +341,35 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
 
     wifi_mode_t mode = WIFI_MODE_NULL;
     esp_err_t mode_err = esp_wifi_get_mode(&mode);
-    if (mode_err != ESP_OK && mode_err != ESP_ERR_WIFI_NOT_INIT)
+    if (mode_err == ESP_ERR_WIFI_NOT_INIT)
+    {
+        mode = WIFI_MODE_NULL;
+    }
+    else if (mode_err != ESP_OK)
     {
         ESP_LOGE(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(mode_err));
         return mode_err;
     }
 
-    if (mode != WIFI_MODE_NULL && mode != WIFI_MODE_AP)
+    bool keep_sta_active = (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA);
+    wifi_mode_t target_mode = keep_sta_active ? WIFI_MODE_APSTA : WIFI_MODE_AP;
+
+    if (mode != target_mode)
     {
-        stop_wifi_if_running();
+        ESP_LOGI(TAG, "Switching WiFi mode from %d to %d", mode, target_mode);
+        ESP_ERROR_CHECK(esp_wifi_set_mode(target_mode));
+    }
+    else if (target_mode == WIFI_MODE_APSTA)
+    {
+        ESP_LOGD(TAG, "APSTA mode already active while starting AP");
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    esp_err_t config_err = esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
+    if (config_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_set_config (AP) failed: %s", esp_err_to_name(config_err));
+        return config_err;
+    }
 
     esp_err_t start_err = esp_wifi_start();
     if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_CONN)
@@ -362,18 +378,28 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
         return start_err;
     }
 
-    s_current_mode = WIFI_MODE_AP;
-    s_wifi_connected = false;
-    s_sta_retry_count = 0;
-    s_restore_ap_on_scan = false;
-
-    if (s_sta_retry_timer)
+    s_current_mode = target_mode;
+    if (!keep_sta_active)
     {
-        xTimerStop(s_sta_retry_timer, 0);
+        s_wifi_connected = false;
+        s_sta_retry_count = 0;
+        s_restore_ap_on_scan = false;
+
+        if (s_sta_retry_timer)
+        {
+            xTimerStop(s_sta_retry_timer, 0);
+        }
     }
 
-    ESP_LOGI(TAG, "AP started: SSID=%s, IP=192.168.4.1", s_ap_ssid);
-    ESP_LOGI(TAG, "Access via: http://%s.local or http://192.168.4.1", s_hostname);
+    if (keep_sta_active)
+    {
+        ESP_LOGI(TAG, "AP interface enabled alongside STA: SSID=%s", s_ap_ssid);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "AP started: SSID=%s, IP=192.168.4.1", s_ap_ssid);
+        ESP_LOGI(TAG, "Access via: http://%s.local or http://192.168.4.1", s_hostname);
+    }
 
     http_server_publish_wifi_status();
     return ESP_OK;

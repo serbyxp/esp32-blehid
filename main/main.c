@@ -154,6 +154,21 @@ static void log_consumer_usage_mapping(uint16_t usage, uint16_t mask, bool activ
     }
 }
 
+static const char *wifi_mode_status_string(wifi_mode_t mode, bool connected)
+{
+    switch (mode)
+    {
+    case WIFI_MODE_STA:
+        return connected ? "sta" : "connecting";
+    case WIFI_MODE_AP:
+        return "ap";
+    case WIFI_MODE_APSTA:
+        return connected ? "apsta" : "apsta_connecting";
+    default:
+        return "none";
+    }
+}
+
 static void populate_wifi_status_json(cJSON *obj)
 {
     if (!obj)
@@ -162,23 +177,11 @@ static void populate_wifi_status_json(cJSON *obj)
     }
 
     wifi_mode_t mode = wifi_manager_get_mode();
-    const char *mode_str = "none";
-
-    if (mode == WIFI_MODE_STA)
-    {
-        mode_str = wifi_manager_is_connected() ? "sta" : "connecting";
-    }
-    else if (mode == WIFI_MODE_AP)
-    {
-        mode_str = "ap";
-    }
-    else if (mode == WIFI_MODE_APSTA)
-    {
-        mode_str = wifi_manager_is_connected() ? "apsta" : "apsta_connecting";
-    }
+    bool connected = wifi_manager_is_connected();
+    const char *mode_str = wifi_mode_status_string(mode, connected);
 
     cJSON_AddStringToObject(obj, "mode", mode_str);
-    cJSON_AddBoolToObject(obj, "connected", wifi_manager_is_connected());
+    cJSON_AddBoolToObject(obj, "connected", connected);
     cJSON_AddBoolToObject(obj, "scanning", wifi_manager_is_scanning());
     cJSON_AddNumberToObject(obj, "retry_count", wifi_manager_get_retry_count());
     cJSON_AddStringToObject(obj, "hostname", wifi_manager_get_hostname());
@@ -617,40 +620,60 @@ static void on_control_message(cJSON *msg)
 
                             if (wifi_manager_is_connected())
                             {
+                                if (ap_was_active && wifi_manager_disable_ap() == ESP_OK)
+                                {
+                                    status_changed = true;
+                                }
+
                                 char ip[16] = {0};
                                 if (wifi_manager_get_ip(ip, sizeof(ip)) == ESP_OK)
                                 {
                                     cJSON_AddStringToObject(response, "ip", ip);
                                 }
-                                cJSON_AddStringToObject(response, "mode", "sta");
 
-                                if (ap_was_active && wifi_manager_disable_ap() == ESP_OK)
-                                {
-                                    status_changed = true;
-                                }
+                                wifi_mode_t mode_after = wifi_manager_get_mode();
+                                cJSON_AddStringToObject(response, "mode",
+                                                        wifi_mode_status_string(mode_after, true));
                             }
                             else
                             {
-                                char ip[16] = "192.168.4.1";
+                                status_changed = true;
+
+                                wifi_mode_t mode_before = wifi_manager_get_mode();
                                 if (ap_was_active)
                                 {
-                                    if (wifi_manager_restore_ap_mode() == ESP_OK)
+                                    if (mode_before == WIFI_MODE_AP)
                                     {
-                                        status_changed = true;
-                                    }
-                                    if (wifi_manager_get_ip(ip, sizeof(ip)) != ESP_OK)
-                                    {
-                                        strncpy(ip, "192.168.4.1", sizeof(ip));
-                                        ip[sizeof(ip) - 1] = '\0';
+                                        esp_err_t apsta_err = wifi_manager_enable_apsta();
+                                        if (apsta_err != ESP_OK)
+                                        {
+                                            ESP_LOGW(TAG, "Failed to keep STA active during AP fallback: %s",
+                                                     esp_err_to_name(apsta_err));
+                                        }
                                     }
                                 }
                                 else
                                 {
-                                    wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-                                    status_changed = true;
+                                    esp_err_t fallback_err = wifi_manager_start_ap(NULL,
+                                                                                   WIFI_MANAGER_DEFAULT_AP_PASS);
+                                    if (fallback_err != ESP_OK)
+                                    {
+                                        ESP_LOGE(TAG, "Failed to start AP fallback: %s",
+                                                 esp_err_to_name(fallback_err));
+                                    }
                                 }
 
-                                cJSON_AddStringToObject(response, "mode", "ap");
+                                wifi_mode_t mode_after = wifi_manager_get_mode();
+                                bool connected_now = wifi_manager_is_connected();
+                                cJSON_AddStringToObject(response, "mode",
+                                                        wifi_mode_status_string(mode_after, connected_now));
+
+                                char ip[16] = {0};
+                                if (wifi_manager_get_ip(ip, sizeof(ip)) != ESP_OK || strlen(ip) == 0)
+                                {
+                                    strncpy(ip, "192.168.4.1", sizeof(ip));
+                                    ip[sizeof(ip) - 1] = '\0';
+                                }
                                 cJSON_AddStringToObject(response, "ip", ip);
                             }
 
@@ -710,11 +733,19 @@ static void on_control_message(cJSON *msg)
         esp_err_t err = wifi_manager_clear_config();
         if (err == ESP_OK)
         {
-            wifi_manager_stop();
-            wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-            cJSON_AddBoolToObject(response, "ok", true);
+            esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+            bool ok = (ap_err == ESP_OK);
+            cJSON_AddBoolToObject(response, "ok", ok);
+            if (!ok)
+            {
+                cJSON_AddStringToObject(response, "err", esp_err_to_name(ap_err));
+            }
+
             notify_wifi_status();
-            broadcast_ble_status();
+            if (ok)
+            {
+                broadcast_ble_status();
+            }
         }
         else
         {
