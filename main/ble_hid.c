@@ -17,6 +17,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 void ble_store_config_init(void);
 
@@ -185,10 +187,47 @@ static uint8_t s_battery_level = 100;
 static uint8_t s_protocol_mode = 1; // Report protocol
 static uint8_t s_hid_control = 0;
 
+// Notification retry configuration
+#define HID_NOTIFY_MAX_ATTEMPTS 3
+#define HID_NOTIFY_RETRY_DELAY_MS 10
+
 // Forward declarations
 static int ble_hid_gap_event(struct ble_gap_event *event, void *arg);
 static void ble_hid_on_sync(void);
 static void ble_hid_on_reset(int reason);
+
+static esp_err_t ble_hid_send_notification(uint16_t attr_handle, const uint8_t *data, size_t len)
+{
+    for (int attempt = 0; attempt < HID_NOTIFY_MAX_ATTEMPTS; ++attempt)
+    {
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
+        if (!om)
+        {
+            vTaskDelay(pdMS_TO_TICKS(HID_NOTIFY_RETRY_DELAY_MS));
+            continue;
+        }
+
+        int rc = ble_gatts_notify_custom(s_handles.conn_handle, attr_handle, om);
+        if (rc == 0)
+        {
+            return ESP_OK;
+        }
+
+        os_mbuf_free_chain(om);
+
+        if (rc == BLE_HS_ENOMEM)
+        {
+            vTaskDelay(pdMS_TO_TICKS(HID_NOTIFY_RETRY_DELAY_MS));
+            continue;
+        }
+
+        ESP_LOGW(TAG, "Notify failed (handle=0x%04X, rc=%d)", attr_handle, rc);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGW(TAG, "Notify failed: out of memory (handle=0x%04X)", attr_handle);
+    return ESP_ERR_NO_MEM;
+}
 
 // HID Information
 static int hid_info_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -974,36 +1013,23 @@ esp_err_t ble_hid_notify_mouse(const mouse_state_t *state)
 
     if (s_handles.subscribed_mouse)
     {
-        struct os_mbuf *om = ble_hs_mbuf_from_flat(s_mouse_report, sizeof(s_mouse_report));
-        if (!om)
+        esp_err_t err = ble_hid_send_notification(s_handles.mouse_report_handle,
+                                                  s_mouse_report,
+                                                  sizeof(s_mouse_report));
+        if (err != ESP_OK)
         {
-            return ESP_ERR_NO_MEM;
-        }
-
-        int rc = ble_gatts_notify_custom(s_handles.conn_handle,
-                                         s_handles.mouse_report_handle, om);
-        if (rc != 0)
-        {
-            ESP_LOGW(TAG, "Mouse notify failed; rc=%d", rc);
-            result = ESP_FAIL;
+            result = err;
         }
     }
 
     if (s_handles.subscribed_mouse_boot)
     {
-        struct os_mbuf *om_boot = ble_hs_mbuf_from_flat(s_boot_mouse_report,
-                                                        sizeof(s_boot_mouse_report));
-        if (!om_boot)
+        esp_err_t err = ble_hid_send_notification(s_handles.mouse_boot_input_handle,
+                                                  s_boot_mouse_report,
+                                                  sizeof(s_boot_mouse_report));
+        if (err != ESP_OK && result == ESP_OK)
         {
-            return ESP_ERR_NO_MEM;
-        }
-
-        int rc = ble_gatts_notify_custom(s_handles.conn_handle,
-                                         s_handles.mouse_boot_input_handle, om_boot);
-        if (rc != 0)
-        {
-            ESP_LOGW(TAG, "Boot mouse notify failed; rc=%d", rc);
-            result = ESP_FAIL;
+            result = err;
         }
     }
 
@@ -1037,37 +1063,23 @@ esp_err_t ble_hid_notify_keyboard(const keyboard_state_t *state)
 
     if (s_handles.subscribed_keyboard)
     {
-        struct os_mbuf *om = ble_hs_mbuf_from_flat(s_keyboard_report,
-                                                   sizeof(s_keyboard_report));
-        if (!om)
+        esp_err_t err = ble_hid_send_notification(s_handles.keyboard_input_handle,
+                                                  s_keyboard_report,
+                                                  sizeof(s_keyboard_report));
+        if (err != ESP_OK)
         {
-            return ESP_ERR_NO_MEM;
-        }
-
-        int rc = ble_gatts_notify_custom(s_handles.conn_handle,
-                                         s_handles.keyboard_input_handle, om);
-        if (rc != 0)
-        {
-            ESP_LOGW(TAG, "Keyboard notify failed; rc=%d", rc);
-            result = ESP_FAIL;
+            result = err;
         }
     }
 
     if (s_handles.subscribed_keyboard_boot)
     {
-        struct os_mbuf *om_boot = ble_hs_mbuf_from_flat(s_boot_keyboard_report,
-                                                        sizeof(s_boot_keyboard_report));
-        if (!om_boot)
+        esp_err_t err = ble_hid_send_notification(s_handles.keyboard_boot_input_handle,
+                                                  s_boot_keyboard_report,
+                                                  sizeof(s_boot_keyboard_report));
+        if (err != ESP_OK && result == ESP_OK)
         {
-            return ESP_ERR_NO_MEM;
-        }
-
-        int rc = ble_gatts_notify_custom(s_handles.conn_handle,
-                                         s_handles.keyboard_boot_input_handle, om_boot);
-        if (rc != 0)
-        {
-            ESP_LOGW(TAG, "Boot keyboard notify failed; rc=%d", rc);
-            result = ESP_FAIL;
+            result = err;
         }
     }
 
@@ -1095,21 +1107,7 @@ esp_err_t ble_hid_notify_consumer(uint16_t usage_mask)
     report[1] = report_mask & 0xFF;
     report[2] = (report_mask >> 8) & 0xFF;
 
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
-    if (!om)
-    {
-        return ESP_ERR_NO_MEM;
-    }
-
-    int rc = ble_gatts_notify_custom(s_handles.conn_handle,
-                                     s_handles.consumer_input_handle, om);
-    if (rc != 0)
-    {
-        ESP_LOGW(TAG, "Consumer notify failed; rc=%d", rc);
-        return ESP_FAIL;
-    }
-
-    return ESP_OK;
+    return ble_hid_send_notification(s_handles.consumer_input_handle, report, sizeof(report));
 }
 
 bool ble_hid_is_connected(void)
