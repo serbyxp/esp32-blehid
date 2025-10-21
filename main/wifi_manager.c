@@ -152,6 +152,22 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         // Update mDNS
         mdns_service_txt_item_set("_http", "_tcp", "ip", ip4addr_ntoa(&event->ip_info.ip));
 #endif
+
+        wifi_mode_t mode = WIFI_MODE_NULL;
+        esp_err_t mode_err = esp_wifi_get_mode(&mode);
+        if (mode_err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "Failed to get WiFi mode after STA got IP: %s", esp_err_to_name(mode_err));
+        }
+        else if (mode == WIFI_MODE_APSTA)
+        {
+            ESP_LOGI(TAG, "STA connected while AP active; disabling AP interface");
+            esp_err_t disable_err = wifi_manager_disable_ap();
+            if (disable_err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to disable AP interface after STA connection: %s", esp_err_to_name(disable_err));
+            }
+        }
         http_server_publish_wifi_status();
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
