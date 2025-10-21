@@ -574,36 +574,105 @@ static void on_control_message(cJSON *msg)
 
                     if (apply)
                     {
-                        wifi_manager_stop();
-                        vTaskDelay(pdMS_TO_TICKS(100));
-                        err = wifi_manager_start_sta(ssid, psk);
-                        status_changed = (err == ESP_OK);
+                        wifi_mode_t initial_mode = wifi_manager_get_mode();
+                        bool ap_was_active = (initial_mode == WIFI_MODE_AP || initial_mode == WIFI_MODE_APSTA);
+                        bool apply_success = true;
+                        const char *apply_error = NULL;
 
-                        // Wait a bit for connection
-                        for (int i = 0; err == ESP_OK && i < 80 && !wifi_manager_is_connected(); i++)
+                        if (ap_was_active)
                         {
-                            vTaskDelay(pdMS_TO_TICKS(100));
+                            esp_err_t apsta_err = wifi_manager_enable_apsta();
+                            if (apsta_err != ESP_OK)
+                            {
+                                apply_success = false;
+                                apply_error = "apsta_transition_failed";
+                            }
+                            else if (initial_mode == WIFI_MODE_AP)
+                            {
+                                status_changed = true;
+                            }
                         }
 
-                        if (err == ESP_OK && wifi_manager_is_connected())
+                        esp_err_t start_err = ESP_OK;
+                        if (apply_success)
                         {
-                            char ip[16] = {0};
-                            wifi_manager_get_ip(ip, sizeof(ip));
-                            cJSON_AddStringToObject(response, "mode", "sta");
-                            cJSON_AddStringToObject(response, "ip", ip);
+                            start_err = wifi_manager_start_sta(ssid, psk);
+                            if (start_err == ESP_OK)
+                            {
+                                status_changed = true;
+                            }
+                            else
+                            {
+                                apply_success = false;
+                                apply_error = "sta_start_failed";
+                            }
+                        }
+
+                        if (apply_success)
+                        {
+                            for (int i = 0; i < 80 && !wifi_manager_is_connected(); i++)
+                            {
+                                vTaskDelay(pdMS_TO_TICKS(100));
+                            }
+
+                            if (wifi_manager_is_connected())
+                            {
+                                char ip[16] = {0};
+                                if (wifi_manager_get_ip(ip, sizeof(ip)) == ESP_OK)
+                                {
+                                    cJSON_AddStringToObject(response, "ip", ip);
+                                }
+                                cJSON_AddStringToObject(response, "mode", "sta");
+
+                                if (ap_was_active && wifi_manager_disable_ap() == ESP_OK)
+                                {
+                                    status_changed = true;
+                                }
+                            }
+                            else
+                            {
+                                char ip[16] = "192.168.4.1";
+                                if (ap_was_active)
+                                {
+                                    if (wifi_manager_restore_ap_mode() == ESP_OK)
+                                    {
+                                        status_changed = true;
+                                    }
+                                    if (wifi_manager_get_ip(ip, sizeof(ip)) != ESP_OK)
+                                    {
+                                        strncpy(ip, "192.168.4.1", sizeof(ip));
+                                        ip[sizeof(ip) - 1] = '\0';
+                                    }
+                                }
+                                else
+                                {
+                                    wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+                                    status_changed = true;
+                                }
+
+                                cJSON_AddStringToObject(response, "mode", "ap");
+                                cJSON_AddStringToObject(response, "ip", ip);
+                            }
+
+                            cJSON_AddBoolToObject(response, "ok", true);
                         }
                         else
                         {
-                            // Fallback to AP mode
-                            wifi_manager_stop();
-                            wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-                            cJSON_AddStringToObject(response, "mode", "ap");
-                            cJSON_AddStringToObject(response, "ip", "192.168.4.1");
-                            status_changed = true;
+                            if (ap_was_active && wifi_manager_restore_ap_mode() == ESP_OK && initial_mode != WIFI_MODE_AP)
+                            {
+                                status_changed = true;
+                            }
+                            cJSON_AddBoolToObject(response, "ok", false);
+                            if (apply_error)
+                            {
+                                cJSON_AddStringToObject(response, "err", apply_error);
+                            }
                         }
                     }
-
-                    cJSON_AddBoolToObject(response, "ok", true);
+                    else
+                    {
+                        cJSON_AddBoolToObject(response, "ok", true);
+                    }
 
                     if (status_changed)
                     {
