@@ -98,16 +98,39 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
         ESP_LOGI(TAG, "WiFi disconnected, reason: %d", event->reason);
 
-        // Check for auth failure
-        if (event->reason == WIFI_REASON_AUTH_FAIL ||
-            event->reason == WIFI_REASON_NO_AP_FOUND ||
-            event->reason == WIFI_REASON_ASSOC_FAIL)
+        bool auth_or_config_failure = false;
+        switch (event->reason)
         {
-            ESP_LOGW(TAG, "Connection failed (reason %d), will fallback to AP mode", event->reason);
-            s_sta_retry_count = MAX_STA_RETRY; // Force fallback
+        case WIFI_REASON_AUTH_FAIL:
+        case WIFI_REASON_AUTH_EXPIRE:
+        case WIFI_REASON_NO_AP_FOUND:
+        case WIFI_REASON_ASSOC_FAIL:
+#ifdef WIFI_REASON_HANDSHAKE_TIMEOUT
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:
+#endif
+#ifdef WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+#endif
+#ifdef WIFI_REASON_CONNECTION_FAIL
+        case WIFI_REASON_CONNECTION_FAIL:
+#endif
+            auth_or_config_failure = true;
+            break;
+        default:
+            break;
+        }
+
+        if (auth_or_config_failure)
+        {
+            ESP_LOGW(TAG, "Connection failed (reason %d), restoring AP-only mode", event->reason);
             if (s_sta_retry_timer)
             {
                 xTimerStop(s_sta_retry_timer, 0);
+            }
+            s_sta_retry_count = 0;
+            if (wifi_manager_restore_ap_mode() != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to restore AP-only mode after disconnection");
             }
         }
         else if (s_sta_retry_count < MAX_STA_RETRY)
@@ -133,6 +156,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             if (s_sta_retry_timer)
             {
                 xTimerStop(s_sta_retry_timer, 0);
+            }
+            s_sta_retry_count = 0;
+            if (wifi_manager_restore_ap_mode() != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to restore AP-only mode after max retries");
             }
         }
         http_server_publish_wifi_status();
