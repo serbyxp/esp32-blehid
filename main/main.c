@@ -14,6 +14,7 @@
 #include "transport_ws.h"
 #include "wifi_manager.h"
 #include "http_server.h"
+#include "mouse_report_builder.h"
 
 static const char *TAG = "MAIN";
 
@@ -206,6 +207,32 @@ static void on_mouse_input(const mouse_state_t *state)
 {
     if (!state)
         return;
+
+    uint8_t hid_report[HID_MOUSE_REPORT_LEN] = {0};
+    mouse_build_report(state, hid_report);
+
+    int8_t report_y = (int8_t)hid_report[2];
+    int8_t report_x = (int8_t)hid_report[3];
+    uint8_t masked_buttons = state->buttons & HID_MOUSE_BUTTON_MASK;
+    uint8_t report_buttons = hid_report[1] & HID_MOUSE_BUTTON_MASK;
+
+    ESP_LOGD(TAG,
+             "Mouse input state: x=%d y=%d buttons=0x%02X -> report x=%d y=%d buttons=0x%02X",
+             state->x,
+             state->y,
+             state->buttons,
+             report_x,
+             report_y,
+             report_buttons);
+
+    if (report_x != state->x || report_y != state->y || report_buttons != masked_buttons)
+    {
+        ESP_LOGW(TAG,
+                 "Mouse report mismatch: expected x=%d y=%d buttons=0x%02X (masked)",
+                 state->x,
+                 state->y,
+                 masked_buttons);
+    }
 
     bool changed = false;
 
