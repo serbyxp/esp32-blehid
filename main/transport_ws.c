@@ -299,17 +299,21 @@ static void ws_send_keyboard_state(const keyboard_state_t *state)
     s_callbacks.on_keyboard(state);
 }
 
-static void ws_emit_ascii_reports(const keyboard_state_t reports[WS_ASCII_REPORT_COUNT])
+static void ws_emit_ascii_reports(const keyboard_state_t *reports, size_t count)
 {
-    if (!reports)
+    if (!reports || count == 0)
     {
         return;
     }
 
-    ws_send_keyboard_state(&reports[0]);
-    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS));
-    ws_send_keyboard_state(&reports[1]);
-    vTaskDelay(pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS));
+    for (size_t i = 0; i < count; ++i)
+    {
+        ws_send_keyboard_state(&reports[i]);
+
+        TickType_t delay = (i + 1 < count) ? pdMS_TO_TICKS(WS_ASCII_RELEASE_DELAY_MS)
+                                           : pdMS_TO_TICKS(WS_ASCII_INTERCHAR_DELAY_MS);
+        vTaskDelay(delay);
+    }
 }
 
 static void ws_send_ascii_char(uint8_t ascii)
@@ -330,13 +334,14 @@ static void ws_send_ascii_char(uint8_t ascii)
     }
 
     keyboard_state_t reports[WS_ASCII_REPORT_COUNT] = {0};
-    if (!ws_ascii_prepare_reports(ascii, reports))
+    size_t report_count = 0;
+    if (!ws_ascii_prepare_reports(ascii, reports, &report_count) || report_count == 0)
     {
         ESP_LOGW(TAG, "Unsupported ASCII character: %u", ascii);
         return;
     }
 
-    ws_emit_ascii_reports(reports);
+    ws_emit_ascii_reports(reports, report_count);
 }
 
 static void ws_send_ascii_text(const char *text)
@@ -374,13 +379,14 @@ static void ws_ascii_task(void *arg)
         }
 
         keyboard_state_t reports[WS_ASCII_REPORT_COUNT] = {0};
-        if (!ws_ascii_prepare_reports((uint8_t)ascii, reports))
+        size_t report_count = 0;
+        if (!ws_ascii_prepare_reports((uint8_t)ascii, reports, &report_count) || report_count == 0)
         {
             ESP_LOGW(TAG, "Unsupported ASCII character: %u", ascii);
             continue;
         }
 
-        ws_emit_ascii_reports(reports);
+        ws_emit_ascii_reports(reports, report_count);
     }
 
     s_ascii_task = NULL;
