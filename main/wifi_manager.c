@@ -424,7 +424,26 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
 
     // Ensure WiFi driver is in the desired mode before configuring the STA interface
     ESP_ERROR_CHECK(esp_wifi_set_mode(target_mode));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+
+    esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (config_err == ESP_ERR_WIFI_STATE && ap_active)
+    {
+        ESP_LOGW(TAG, "STA config failed while AP active, disconnecting and retrying");
+        esp_err_t disconnect_err = esp_wifi_disconnect();
+        if (disconnect_err != ESP_OK && disconnect_err != ESP_ERR_WIFI_NOT_STARTED &&
+            disconnect_err != ESP_ERR_WIFI_NOT_INIT)
+        {
+            ESP_LOGW(TAG, "esp_wifi_disconnect returned %s", esp_err_to_name(disconnect_err));
+        }
+
+        config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    }
+
+    if (config_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_set_config (STA) failed: %s", esp_err_to_name(config_err));
+        return config_err;
+    }
 
     esp_err_t start_err = esp_wifi_start();
     if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_CONN)
