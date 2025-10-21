@@ -642,13 +642,13 @@ static void on_control_message(cJSON *msg)
                                 wifi_mode_t mode_before = wifi_manager_get_mode();
                                 if (ap_was_active)
                                 {
-                                    if (mode_before == WIFI_MODE_AP)
+                                    if (mode_before != WIFI_MODE_AP)
                                     {
-                                        esp_err_t apsta_err = wifi_manager_enable_apsta();
-                                        if (apsta_err != ESP_OK)
+                                        esp_err_t restore_err = wifi_manager_restore_ap_mode();
+                                        if (restore_err != ESP_OK)
                                         {
-                                            ESP_LOGW(TAG, "Failed to keep STA active during AP fallback: %s",
-                                                     esp_err_to_name(apsta_err));
+                                            ESP_LOGW(TAG, "Failed to restore AP mode after STA disconnect: %s",
+                                                     esp_err_to_name(restore_err));
                                         }
                                     }
                                 }
