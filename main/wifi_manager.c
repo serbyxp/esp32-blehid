@@ -398,12 +398,16 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
         return mode_err;
     }
 
-    if (mode != WIFI_MODE_NULL && mode != WIFI_MODE_STA)
+    bool ap_active = (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
+    wifi_mode_t target_mode = ap_active ? WIFI_MODE_APSTA : WIFI_MODE_STA;
+
+    if (mode != target_mode)
     {
-        stop_wifi_if_running();
+        ESP_LOGI(TAG, "Switching WiFi mode from %d to %d", mode, target_mode);
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    // Ensure WiFi driver is in the desired mode before configuring the STA interface
+    ESP_ERROR_CHECK(esp_wifi_set_mode(target_mode));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
     esp_err_t start_err = esp_wifi_start();
@@ -413,7 +417,7 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
         return start_err;
     }
 
-    s_current_mode = WIFI_MODE_STA;
+    s_current_mode = target_mode;
     s_wifi_connected = false;
     s_sta_retry_count = 0;
     s_restore_ap_on_scan = false;
