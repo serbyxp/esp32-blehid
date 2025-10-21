@@ -1221,8 +1221,8 @@ esp_err_t ble_hid_notify_mouse(const mouse_state_t *state)
 
     // Boot report (no Report ID)
     s_boot_mouse_report[0] = state->buttons & 0x07;
-    s_boot_mouse_report[1] = (int8_t)state->y;
-    s_boot_mouse_report[2] = (int8_t)state->x;
+    s_boot_mouse_report[1] = (int8_t)state->x;
+    s_boot_mouse_report[2] = (int8_t)state->y;
 
     esp_err_t result = ESP_OK;
 
