@@ -145,6 +145,14 @@ class ConsumerUsageMaskTest(unittest.TestCase):
         if func_src is None:
             raise AssertionError("Failed to locate consumer usage helper")
 
+        mask_to_usage_src = re.search(
+            r"uint16_t\s+ble_hid_consumer_mask_to_usage\(uint16_t mask\)\s*\{.*?\n\}",
+            cls.source_text,
+            re.DOTALL,
+        )
+        if mask_to_usage_src is None:
+            raise AssertionError("Failed to locate consumer mask-to-usage helper")
+
         pack_src = re.search(
             r"void\s+ble_hid_consumer_mask_to_report\(uint16_t mask,\s*uint8_t report\[2\]\)\s*\{.*?\n\}",
             cls.source_text,
@@ -159,11 +167,13 @@ class ConsumerUsageMaskTest(unittest.TestCase):
             #include <stddef.h>
             {array}
             {function}
+            {mask_to_usage}
             {pack}
             """
         ).format(
             array=array_src.group(0),
             function=func_src.group(0),
+            mask_to_usage=mask_to_usage_src.group(0),
             pack=pack_src.group(0),
         )
 
@@ -181,6 +191,8 @@ class ConsumerUsageMaskTest(unittest.TestCase):
         cls.lib = ctypes.CDLL(str(so_path))
         cls.lib.ble_hid_consumer_usage_to_mask.argtypes = [ctypes.c_uint16]
         cls.lib.ble_hid_consumer_usage_to_mask.restype = ctypes.c_uint16
+        cls.lib.ble_hid_consumer_mask_to_usage.argtypes = [ctypes.c_uint16]
+        cls.lib.ble_hid_consumer_mask_to_usage.restype = ctypes.c_uint16
         cls.lib.ble_hid_consumer_mask_to_report.argtypes = [
             ctypes.c_uint16,
             ctypes.POINTER(ctypes.c_uint8),
@@ -229,6 +241,29 @@ class ConsumerUsageMaskTest(unittest.TestCase):
 
         self.assertEqual(report[0], 0x08)
         self.assertEqual(report[1], 0x00)
+
+    def test_mask_round_trip_matches_descriptor(self) -> None:
+        for index, usage in enumerate(self.consumer_usages):
+            mask = 1 << index
+            descriptor_usage = self.lib.ble_hid_consumer_mask_to_usage(mask)
+            self.assertEqual(descriptor_usage, usage)
+
+    def test_consumer_report_bits_for_common_usages(self) -> None:
+        scenarios = [
+            (0x00B5, 0x0001),  # Next Track
+            (0x00CD, 0x0008),  # Play/Pause
+            (0x00E9, 0x0020),  # Volume Up
+        ]
+
+        for usage, expected_mask in scenarios:
+            mask = self.lib.ble_hid_consumer_usage_to_mask(usage)
+            self.assertEqual(mask, expected_mask)
+
+            report = (ctypes.c_uint8 * 2)()
+            self.lib.ble_hid_consumer_mask_to_report(mask, report)
+
+            self.assertEqual(report[0], expected_mask & 0xFF)
+            self.assertEqual(report[1], (expected_mask >> 8) & 0xFF)
 
 if __name__ == "__main__":
     unittest.main()

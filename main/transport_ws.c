@@ -266,7 +266,7 @@ static void process_ws_message(const char *data, size_t len)
             }
             else
             {
-                state.usage = mask;
+                state.usage = raw_usage;
             }
         }
 

@@ -564,6 +564,26 @@ uint16_t ble_hid_consumer_usage_to_mask(uint16_t usage)
     return 0;
 }
 
+uint16_t ble_hid_consumer_mask_to_usage(uint16_t mask)
+{
+    if (mask == 0 || (mask & (mask - 1)) != 0)
+    {
+        return 0;
+    }
+
+    size_t count = sizeof(s_consumer_usages) / sizeof(s_consumer_usages[0]);
+    for (size_t i = 0; i < count; ++i)
+    {
+        uint16_t bit = (uint16_t)(1u << i);
+        if (bit == mask)
+        {
+            return s_consumer_usages[i];
+        }
+    }
+
+    return 0;
+}
+
 void ble_hid_consumer_mask_to_report(uint16_t mask, uint8_t report[2])
 {
     if (!report)
