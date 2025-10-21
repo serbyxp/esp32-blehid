@@ -18,8 +18,11 @@ void mouse_build_report(const mouse_state_t *state, uint8_t report[HID_MOUSE_REP
 
     report[0] = HID_MOUSE_REPORT_ID;
     report[1] = (uint8_t)(state->buttons & HID_MOUSE_BUTTON_MASK);
-    report[2] = (uint8_t)state->x;
-    report[3] = (uint8_t)state->y;
+    // iOS expects the Y delta byte before the X delta byte.
+    // Swap the assignments so horizontal movement is reported in the
+    // position that the host interprets as the X axis.
+    report[2] = (uint8_t)state->y;
+    report[3] = (uint8_t)state->x;
     report[4] = (uint8_t)state->wheel;
     report[5] = (uint8_t)state->hwheel;
 }

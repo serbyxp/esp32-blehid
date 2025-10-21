@@ -85,14 +85,19 @@ class WsMouseReportTest(unittest.TestCase):
         self._lib.mouse_build_report(ctypes.byref(state), report_buffer)
         return list(report_buffer)
 
-    def test_pure_x_delta_updates_second_axis_byte(self) -> None:
+    def test_pure_x_delta_updates_fourth_axis_byte(self) -> None:
         report = self._report_for('{"type":"mouse","dx":42}')
-        self.assertEqual(report, [1, 0x00, 42, 0, 0, 0])
+        self.assertEqual(report, [1, 0x00, 0, 42, 0, 0])
 
     def test_pure_y_delta_updates_third_axis_byte(self) -> None:
         report = self._report_for('{"type":"mouse","dy":-7}')
         # Two's complement for -7 is 0xF9
-        self.assertEqual(report, [1, 0x00, 0, 0xF9, 0, 0])
+        self.assertEqual(report, [1, 0x00, 0xF9, 0, 0, 0])
+
+    def test_dx_message_keeps_y_zero(self) -> None:
+        report = self._report_for('{"type":"mouse","dx":5,"dy":0}')
+        self.assertEqual(report[2], 0)
+        self.assertEqual(report[3], 5)
 
     def test_vertical_scroll_populates_wheel_byte(self) -> None:
         report = self._report_for('{"type":"mouse","wheel":3}')
@@ -108,6 +113,10 @@ class WsMouseReportTest(unittest.TestCase):
             '{"type":"mouse","buttons":{"left":true,"back":true,"forward":true}}'
         )
         self.assertEqual(report, [1, 0x19, 0, 0, 0, 0])
+
+    def test_left_button_click_survives_masking(self) -> None:
+        report = self._report_for('{"type":"mouse","buttons":{"left":true}}')
+        self.assertEqual(report[1] & 0x07, 0x01)
 
 
 if __name__ == "__main__":
