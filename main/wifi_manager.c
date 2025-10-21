@@ -26,6 +26,13 @@
 static const char *TAG = "WIFI_MGR";
 static const char *NVS_WIFI_NAMESPACE = "wifi_config";
 
+ESP_EVENT_DEFINE_BASE(WIFI_MANAGER_EVENT);
+
+enum
+{
+    WIFI_MANAGER_EVENT_RETRY_CONNECT = 0,
+};
+
 static bool s_wifi_connected = false;
 static wifi_mode_t s_current_mode = WIFI_MODE_NULL;
 static char s_hostname[32] = {0};
@@ -53,13 +60,17 @@ static void sta_retry_timer_callback(TimerHandle_t xTimer)
 {
     ESP_LOGI(TAG, "Retry timer expired, attempting to reconnect");
 
-    if (!s_scanning)
-    {
-        esp_wifi_connect();
-    }
-    else
+    if (s_scanning)
     {
         ESP_LOGW(TAG, "Retry skipped because STA is scanning");
+        return;
+    }
+
+    esp_err_t err = esp_event_post(WIFI_MANAGER_EVENT, WIFI_MANAGER_EVENT_RETRY_CONNECT,
+                                   NULL, 0, portMAX_DELAY);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to post retry event: %s", esp_err_to_name(err));
     }
 }
 
@@ -188,6 +199,26 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             s_restore_ap_on_scan = false;
         }
     }
+    else if (event_base == WIFI_MANAGER_EVENT && event_id == WIFI_MANAGER_EVENT_RETRY_CONNECT)
+    {
+        if (s_current_mode != WIFI_MODE_STA)
+        {
+            ESP_LOGI(TAG, "Retry skipped because STA is not active");
+            return;
+        }
+
+        if (s_scanning)
+        {
+            ESP_LOGW(TAG, "Retry skipped because STA is scanning");
+            return;
+        }
+
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "esp_wifi_connect failed during retry: %s", esp_err_to_name(err));
+        }
+    }
 }
 
 static void generate_hostname_and_ssid(void)
@@ -227,6 +258,8 @@ esp_err_t wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                                &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                               &wifi_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_MANAGER_EVENT, WIFI_MANAGER_EVENT_RETRY_CONNECT,
                                                &wifi_event_handler, NULL));
 
     generate_hostname_and_ssid();
@@ -316,6 +349,11 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
     s_wifi_connected = false;
     s_sta_retry_count = 0;
     s_restore_ap_on_scan = false;
+
+    if (s_sta_retry_timer)
+    {
+        xTimerStop(s_sta_retry_timer, 0);
+    }
 
     ESP_LOGI(TAG, "AP started: SSID=%s, IP=192.168.4.1", s_ap_ssid);
     ESP_LOGI(TAG, "Access via: http://%s.local or http://192.168.4.1", s_hostname);
@@ -494,6 +532,10 @@ esp_err_t wifi_manager_stop(void)
         s_current_mode = WIFI_MODE_NULL;
         s_wifi_connected = false;
         s_sta_retry_count = 0;
+        if (s_sta_retry_timer)
+        {
+            xTimerStop(s_sta_retry_timer, 0);
+        }
         ESP_LOGI(TAG, "WiFi stopped");
         http_server_publish_wifi_status();
     }
