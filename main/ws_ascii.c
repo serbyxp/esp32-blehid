@@ -25,21 +25,20 @@ bool ws_ascii_prepare_reports(uint8_t ascii, keyboard_state_t out[WS_ASCII_REPOR
 
     if (has_modifier)
     {
-        out[produced++] = (keyboard_state_t){
+        keyboard_state_t modifier_only = {
             .modifiers = pressed.modifiers,
         };
+
+        out[produced++] = modifier_only;          // Modifier-only press
+        out[produced++] = pressed;                // Key + modifier press
+        out[produced++] = modifier_only;          // Key-only release (modifier held)
+        out[produced++] = (keyboard_state_t){0};  // Modifier release
     }
-
-    out[produced++] = pressed;
-
-    if (has_modifier)
+    else
     {
-        out[produced++] = (keyboard_state_t){
-            .modifiers = pressed.modifiers,
-        };
+        out[produced++] = pressed;
+        out[produced++] = (keyboard_state_t){0};
     }
-
-    out[produced++] = (keyboard_state_t){0};
 
     *out_count = produced;
     return true;
