@@ -4,10 +4,23 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include <string.h>
 #include <stdlib.h>
 
 static const char *TAG = "HID_DEVICE";
+
+#define HID_FLUSH_RETRY_DELAY_MS 30
+
+typedef struct
+{
+    bool mouse;
+    bool keyboard;
+    bool consumer;
+} hid_flush_retry_request_t;
+
+static void hid_device_schedule_retry(hid_device_t *device, bool mouse, bool keyboard, bool consumer);
+static void hid_device_retry_timer_callback(TimerHandle_t timer);
 
 struct hid_device_s
 {
@@ -20,6 +33,10 @@ struct hid_device_s
 static void internal_state_callback(hid_device_state_t state);
 static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyboard, bool consumer);
 static hid_device_t *g_device = NULL;
+static hid_flush_retry_request_t s_pending_retry = {0};
+static TimerHandle_t s_retry_timer = NULL;
+static StaticTimer_t s_retry_timer_buffer;
+static portMUX_TYPE s_retry_lock = portMUX_INITIALIZER_UNLOCKED;
 
 hid_device_t *hid_device_create(const char *device_name)
 {
@@ -54,6 +71,16 @@ void hid_device_destroy(hid_device_t *device)
         {
             hid_device_stop(device);
         }
+        if (s_retry_timer)
+        {
+            xTimerStop(s_retry_timer, 0);
+            vTimerSetTimerID(s_retry_timer, NULL);
+        }
+        portENTER_CRITICAL(&s_retry_lock);
+        s_pending_retry.mouse = false;
+        s_pending_retry.keyboard = false;
+        s_pending_retry.consumer = false;
+        portEXIT_CRITICAL(&s_retry_lock);
         free(device);
         g_device = NULL;
     }
@@ -328,6 +355,77 @@ static void internal_state_callback(hid_device_state_t state)
     }
 }
 
+static void hid_device_retry_timer_callback(TimerHandle_t timer)
+{
+    hid_device_t *device = (hid_device_t *)pvTimerGetTimerID(timer);
+    if (!device)
+    {
+        return;
+    }
+
+    bool mouse = false;
+    bool keyboard = false;
+    bool consumer = false;
+
+    portENTER_CRITICAL(&s_retry_lock);
+    mouse = s_pending_retry.mouse;
+    keyboard = s_pending_retry.keyboard;
+    consumer = s_pending_retry.consumer;
+    s_pending_retry.mouse = false;
+    s_pending_retry.keyboard = false;
+    s_pending_retry.consumer = false;
+    portEXIT_CRITICAL(&s_retry_lock);
+
+    if (mouse || keyboard || consumer)
+    {
+        hid_device_flush_reports(device, mouse, keyboard, consumer);
+    }
+}
+
+static void hid_device_schedule_retry(hid_device_t *device, bool mouse, bool keyboard, bool consumer)
+{
+    if (!device || device->ble_state != DEVICE_STATE_CONNECTED)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&s_retry_lock);
+    s_pending_retry.mouse |= mouse;
+    s_pending_retry.keyboard |= keyboard;
+    s_pending_retry.consumer |= consumer;
+    portEXIT_CRITICAL(&s_retry_lock);
+
+    if (!s_retry_timer)
+    {
+        s_retry_timer = xTimerCreateStatic("hid_flush_retry",
+                                          pdMS_TO_TICKS(HID_FLUSH_RETRY_DELAY_MS),
+                                          pdFALSE,
+                                          device,
+                                          hid_device_retry_timer_callback,
+                                          &s_retry_timer_buffer);
+    }
+    else
+    {
+        vTimerSetTimerID(s_retry_timer, device);
+    }
+
+    if (!s_retry_timer)
+    {
+        ESP_LOGW(TAG, "Failed to create retry timer");
+        return;
+    }
+
+    if (xTimerIsTimerActive(s_retry_timer))
+    {
+        xTimerStop(s_retry_timer, 0);
+    }
+
+    if (xTimerChangePeriod(s_retry_timer, pdMS_TO_TICKS(HID_FLUSH_RETRY_DELAY_MS), 0) != pdPASS)
+    {
+        ESP_LOGW(TAG, "Failed to schedule retry timer");
+    }
+}
+
 static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyboard, bool consumer)
 {
     if (!device || device->ble_state != DEVICE_STATE_CONNECTED)
@@ -338,7 +436,13 @@ static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyb
     if (mouse)
     {
         esp_err_t err = hid_device_notify_mouse(device);
-        if (err != ESP_OK)
+        if (err == ESP_ERR_NO_MEM)
+        {
+            ESP_LOGW(TAG, "Mouse notify out of memory, scheduling retry");
+            device->state.mouse_updated = true;
+            hid_device_schedule_retry(device, true, false, false);
+        }
+        else if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to notify mouse report: %s", esp_err_to_name(err));
         }
@@ -347,7 +451,13 @@ static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyb
     if (keyboard)
     {
         esp_err_t err = hid_device_notify_keyboard(device);
-        if (err != ESP_OK)
+        if (err == ESP_ERR_NO_MEM)
+        {
+            ESP_LOGW(TAG, "Keyboard notify out of memory, scheduling retry");
+            device->state.keyboard_updated = true;
+            hid_device_schedule_retry(device, false, true, false);
+        }
+        else if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to notify keyboard report: %s", esp_err_to_name(err));
         }
@@ -360,7 +470,14 @@ static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyb
                (device->state.consumer_updated || device->state.consumer_pending_release))
         {
             esp_err_t err = hid_device_notify_consumer(device);
-            if (err != ESP_OK)
+            if (err == ESP_ERR_NO_MEM)
+            {
+                ESP_LOGW(TAG, "Consumer notify out of memory, scheduling retry");
+                device->state.consumer_updated = true;
+                hid_device_schedule_retry(device, false, false, true);
+                break;
+            }
+            else if (err != ESP_OK)
             {
                 ESP_LOGE(TAG, "Failed to notify consumer report: %s", esp_err_to_name(err));
                 break;
