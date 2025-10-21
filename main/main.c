@@ -174,7 +174,7 @@ static void populate_wifi_status_json(cJSON *obj)
     }
     else if (mode == WIFI_MODE_APSTA)
     {
-        mode_str = wifi_manager_is_connected() ? "apsta" : "ap";
+        mode_str = wifi_manager_is_connected() ? "apsta" : "apsta_connecting";
     }
 
     cJSON_AddStringToObject(obj, "mode", mode_str);
@@ -818,17 +818,48 @@ void app_main(void)
     // Try to load and connect to saved WiFi
     char ssid[33] = {0};
     char pass[64] = {0};
-    if (wifi_manager_load_config(ssid, sizeof(ssid), pass, sizeof(pass)) == ESP_OK)
+    bool has_saved_config = false;
+    if (wifi_manager_load_config(ssid, sizeof(ssid), pass, sizeof(pass)) == ESP_OK && strlen(ssid) > 0)
     {
-        ESP_LOGI(TAG, "Connecting to saved WiFi: %s", ssid);
-        wifi_manager_start_sta(ssid, pass);
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        has_saved_config = true;
     }
 
-    // If not connected, start AP mode
-    if (!wifi_manager_is_connected())
+    if (has_saved_config)
     {
-        wifi_manager_stop();
+        ESP_LOGI(TAG, "Connecting to saved WiFi: %s", ssid);
+
+        bool ap_started = false;
+        esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+        if (ap_err == ESP_OK)
+        {
+            ap_started = true;
+            ESP_LOGI(TAG, "AP fallback available: %s", wifi_manager_get_ap_ssid());
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Failed to start AP fallback: %s", esp_err_to_name(ap_err));
+        }
+
+        esp_err_t sta_err = wifi_manager_start_sta(ssid, pass);
+        if (sta_err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to start STA with saved config: %s", esp_err_to_name(sta_err));
+            if (!ap_started)
+            {
+                esp_err_t fallback_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+                if (fallback_err == ESP_OK)
+                {
+                    ESP_LOGI(TAG, "AP mode active after STA start failure: %s", wifi_manager_get_ap_ssid());
+                }
+                else
+                {
+                    ESP_LOGE(TAG, "Failed to start AP mode after STA failure: %s", esp_err_to_name(fallback_err));
+                }
+            }
+        }
+    }
+    else
+    {
         esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
         if (ap_err == ESP_OK)
         {

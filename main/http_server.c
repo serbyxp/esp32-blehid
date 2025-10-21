@@ -35,7 +35,7 @@ static void populate_wifi_status_json(cJSON *obj)
     }
     else if (mode == WIFI_MODE_APSTA)
     {
-        mode_str = wifi_manager_is_connected() ? "apsta" : "ap";
+        mode_str = wifi_manager_is_connected() ? "apsta" : "apsta_connecting";
     }
 
     cJSON_AddStringToObject(obj, "mode", mode_str);
