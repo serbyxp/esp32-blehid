@@ -190,15 +190,20 @@ static uint8_t s_protocol_mode = 1; // Report protocol
 static uint8_t s_hid_control = 0;
 
 // Notification retry configuration
-#define HID_NOTIFY_MAX_ATTEMPTS 6
+#define HID_NOTIFY_MAX_ATTEMPTS 16
 #define HID_NOTIFY_RETRY_BASE_DELAY_MS 10
 #define HID_NOTIFY_RETRY_MAX_DELAY_MS 160
+#define HID_NOTIFY_MAX_WAIT_MS 500
 
 // ENOMEM metrics tracking
 typedef struct
 {
     uint16_t handle;
-    uint32_t count;
+    uint32_t attempts;
+    uint32_t successes;
+    uint32_t failures;
+    uint32_t enomem_alloc;
+    uint32_t enomem_notify;
 } hid_enomem_metric_t;
 
 static hid_enomem_metric_t s_enomem_metrics[12];
@@ -215,9 +220,81 @@ static uint32_t hid_notify_calculate_delay_ms(int attempt)
     return delay;
 }
 
+static hid_enomem_metric_t *hid_notify_get_or_create_metric(uint16_t attr_handle)
+{
+    size_t index = SIZE_MAX;
+
+    for (size_t i = 0; i < s_enomem_metric_count; ++i)
+    {
+        if (s_enomem_metrics[i].handle == attr_handle)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if (index == SIZE_MAX)
+    {
+        if (s_enomem_metric_count < (sizeof(s_enomem_metrics) / sizeof(s_enomem_metrics[0])))
+        {
+            index = s_enomem_metric_count++;
+        }
+        else
+        {
+            index = s_enomem_metric_count - 1;
+        }
+
+        s_enomem_metrics[index].handle = attr_handle;
+        s_enomem_metrics[index].attempts = 0;
+        s_enomem_metrics[index].successes = 0;
+        s_enomem_metrics[index].failures = 0;
+        s_enomem_metrics[index].enomem_alloc = 0;
+        s_enomem_metrics[index].enomem_notify = 0;
+    }
+
+    return &s_enomem_metrics[index];
+}
+
+static uint32_t hid_notify_compute_rate_basis_points(const hid_enomem_metric_t *metric)
+{
+    uint32_t total_events = metric->enomem_alloc + metric->enomem_notify;
+    if (metric->attempts == 0 || total_events == 0)
+    {
+        return 0;
+    }
+
+    return (total_events * 10000) / metric->attempts;
+}
+
+static void hid_notify_record_attempt(uint16_t attr_handle)
+{
+    portENTER_CRITICAL(&s_enomem_metrics_lock);
+    hid_enomem_metric_t *metric = hid_notify_get_or_create_metric(attr_handle);
+    metric->attempts++;
+    portEXIT_CRITICAL(&s_enomem_metrics_lock);
+}
+
+static void hid_notify_record_success(uint16_t attr_handle)
+{
+    portENTER_CRITICAL(&s_enomem_metrics_lock);
+    hid_enomem_metric_t *metric = hid_notify_get_or_create_metric(attr_handle);
+    metric->successes++;
+    portEXIT_CRITICAL(&s_enomem_metrics_lock);
+}
+
+static void hid_notify_record_failure(uint16_t attr_handle)
+{
+    portENTER_CRITICAL(&s_enomem_metrics_lock);
+    hid_enomem_metric_t *metric = hid_notify_get_or_create_metric(attr_handle);
+    metric->failures++;
+    portEXIT_CRITICAL(&s_enomem_metrics_lock);
+}
+
 static void hid_notify_record_enomem(uint16_t attr_handle, int attempt, const char *stage)
 {
-    uint32_t count = 0;
+    uint32_t attempts = 0;
+    uint32_t events = 0;
+    uint32_t rate_bp = 0;
 
     portENTER_CRITICAL(&s_enomem_metrics_lock);
     size_t index = SIZE_MAX;
@@ -242,19 +319,37 @@ static void hid_notify_record_enomem(uint16_t attr_handle, int attempt, const ch
             index = s_enomem_metric_count - 1;
         }
         s_enomem_metrics[index].handle = attr_handle;
-        s_enomem_metrics[index].count = 0;
+        s_enomem_metrics[index].attempts = 0;
+        s_enomem_metrics[index].successes = 0;
+        s_enomem_metrics[index].failures = 0;
+        s_enomem_metrics[index].enomem_alloc = 0;
+        s_enomem_metrics[index].enomem_notify = 0;
     }
 
-    s_enomem_metrics[index].count++;
-    count = s_enomem_metrics[index].count;
+    if (strcmp(stage, "alloc") == 0)
+    {
+        s_enomem_metrics[index].enomem_alloc++;
+    }
+    else
+    {
+        s_enomem_metrics[index].enomem_notify++;
+    }
+
+    attempts = s_enomem_metrics[index].attempts;
+    events = s_enomem_metrics[index].enomem_alloc + s_enomem_metrics[index].enomem_notify;
+    rate_bp = hid_notify_compute_rate_basis_points(&s_enomem_metrics[index]);
     portEXIT_CRITICAL(&s_enomem_metrics_lock);
 
     ESP_LOGW(TAG,
-             "Notify ENOMEM (handle=0x%04X, attempt=%d, stage=%s, total=%" PRIu32 ")",
+             "Notify ENOMEM (handle=0x%04X, attempt=%d, stage=%s, total=%" PRIu32
+             "/%" PRIu32 " attempts, rate=%" PRIu32 ".%02" PRIu32 "%%)",
              attr_handle,
              attempt + 1,
              stage,
-             count);
+             events,
+             attempts,
+             rate_bp / 100,
+             rate_bp % 100);
 }
 
 // Forward declarations
@@ -264,22 +359,31 @@ static void ble_hid_on_reset(int reason);
 
 static esp_err_t ble_hid_send_notification(uint16_t attr_handle, const uint8_t *data, size_t len)
 {
+    TickType_t start = xTaskGetTickCount();
+    const TickType_t max_wait = pdMS_TO_TICKS(HID_NOTIFY_MAX_WAIT_MS);
+
     for (int attempt = 0; attempt < HID_NOTIFY_MAX_ATTEMPTS; ++attempt)
     {
+        hid_notify_record_attempt(attr_handle);
+
         struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
         if (!om)
         {
             hid_notify_record_enomem(attr_handle, attempt, "alloc");
-            if (attempt < HID_NOTIFY_MAX_ATTEMPTS - 1)
+
+            if ((xTaskGetTickCount() - start) >= max_wait)
             {
-                vTaskDelay(pdMS_TO_TICKS(hid_notify_calculate_delay_ms(attempt)));
+                break;
             }
+
+            vTaskDelay(pdMS_TO_TICKS(hid_notify_calculate_delay_ms(attempt)));
             continue;
         }
 
         int rc = ble_gatts_notify_custom(s_handles.conn_handle, attr_handle, om);
         if (rc == 0)
         {
+            hid_notify_record_success(attr_handle);
             return ESP_OK;
         }
 
@@ -288,10 +392,13 @@ static esp_err_t ble_hid_send_notification(uint16_t attr_handle, const uint8_t *
         if (rc == BLE_HS_ENOMEM)
         {
             hid_notify_record_enomem(attr_handle, attempt, "notify");
-            if (attempt < HID_NOTIFY_MAX_ATTEMPTS - 1)
+
+            if ((xTaskGetTickCount() - start) >= max_wait)
             {
-                vTaskDelay(pdMS_TO_TICKS(hid_notify_calculate_delay_ms(attempt)));
+                break;
             }
+
+            vTaskDelay(pdMS_TO_TICKS(hid_notify_calculate_delay_ms(attempt)));
             continue;
         }
 
@@ -299,10 +406,31 @@ static esp_err_t ble_hid_send_notification(uint16_t attr_handle, const uint8_t *
         return ESP_FAIL;
     }
 
+    hid_notify_record_failure(attr_handle);
+
+    uint32_t attempts = 0;
+    uint32_t events = 0;
+    uint32_t failures = 0;
+    uint32_t rate_bp = 0;
+
+    portENTER_CRITICAL(&s_enomem_metrics_lock);
+    hid_enomem_metric_t *metric = hid_notify_get_or_create_metric(attr_handle);
+    attempts = metric->attempts;
+    events = metric->enomem_alloc + metric->enomem_notify;
+    failures = metric->failures;
+    rate_bp = hid_notify_compute_rate_basis_points(metric);
+    portEXIT_CRITICAL(&s_enomem_metrics_lock);
+
     ESP_LOGW(TAG,
-             "Notify failed: out of memory after %d attempts (handle=0x%04X)",
-             HID_NOTIFY_MAX_ATTEMPTS,
-             attr_handle);
+             "Notify failed: out of memory (handle=0x%04X, attempts=%" PRIu32
+             ", ENOMEM=%" PRIu32 ", failures=%" PRIu32 ", rate=%" PRIu32 ".%02" PRIu32 "%%)",
+             attr_handle,
+             attempts,
+             events,
+             failures,
+             rate_bp / 100,
+             rate_bp % 100);
+
     return ESP_ERR_NO_MEM;
 }
 

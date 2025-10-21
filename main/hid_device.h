@@ -3,8 +3,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "esp_err.h"
 #include "hid_keyboard.h"
+
+#define HID_MOUSE_QUEUE_DEPTH 8
+#define HID_KEYBOARD_QUEUE_DEPTH 32
+#define HID_CONSUMER_QUEUE_DEPTH 16
 
 // Device states
 typedef enum
@@ -42,6 +47,24 @@ typedef struct
     consumer_state_t consumer;
     bool consumer_updated;
     bool consumer_pending_release;
+    struct
+    {
+        mouse_state_t entries[HID_MOUSE_QUEUE_DEPTH];
+        size_t head;
+        size_t count;
+    } mouse_queue;
+    struct
+    {
+        keyboard_state_t entries[HID_KEYBOARD_QUEUE_DEPTH];
+        size_t head;
+        size_t count;
+    } keyboard_queue;
+    struct
+    {
+        uint16_t entries[HID_CONSUMER_QUEUE_DEPTH];
+        size_t head;
+        size_t count;
+    } consumer_queue;
 } device_state_t;
 
 // Device control

@@ -38,6 +38,176 @@ static TimerHandle_t s_retry_timer = NULL;
 static StaticTimer_t s_retry_timer_buffer;
 static portMUX_TYPE s_retry_lock = portMUX_INITIALIZER_UNLOCKED;
 
+static bool mouse_states_equal(const mouse_state_t *a, const mouse_state_t *b)
+{
+    return a->x == b->x && a->y == b->y && a->wheel == b->wheel &&
+           a->hwheel == b->hwheel && a->buttons == b->buttons;
+}
+
+static void hid_device_mouse_queue_push(device_state_t *state, const mouse_state_t *value)
+{
+    if (!state || !value)
+    {
+        return;
+    }
+
+    if (state->mouse_queue.count > 0)
+    {
+        size_t last_index = (state->mouse_queue.head + state->mouse_queue.count - 1) %
+                            HID_MOUSE_QUEUE_DEPTH;
+        if (mouse_states_equal(&state->mouse_queue.entries[last_index], value))
+        {
+            return;
+        }
+    }
+
+    if (state->mouse_queue.count == HID_MOUSE_QUEUE_DEPTH)
+    {
+        ESP_LOGW(TAG, "Mouse queue full, dropping oldest report");
+        state->mouse_queue.head = (state->mouse_queue.head + 1) % HID_MOUSE_QUEUE_DEPTH;
+        state->mouse_queue.count--;
+    }
+
+    size_t tail = (state->mouse_queue.head + state->mouse_queue.count) % HID_MOUSE_QUEUE_DEPTH;
+    state->mouse_queue.entries[tail] = *value;
+    state->mouse_queue.count++;
+    state->mouse_updated = true;
+}
+
+static mouse_state_t *hid_device_mouse_queue_peek(device_state_t *state)
+{
+    if (!state || state->mouse_queue.count == 0)
+    {
+        return NULL;
+    }
+
+    return &state->mouse_queue.entries[state->mouse_queue.head];
+}
+
+static void hid_device_mouse_queue_pop(device_state_t *state)
+{
+    if (!state || state->mouse_queue.count == 0)
+    {
+        return;
+    }
+
+    state->mouse_queue.head = (state->mouse_queue.head + 1) % HID_MOUSE_QUEUE_DEPTH;
+    state->mouse_queue.count--;
+    state->mouse_updated = (state->mouse_queue.count > 0);
+}
+
+static bool keyboard_states_equal(const keyboard_state_t *a, const keyboard_state_t *b)
+{
+    return a->modifiers == b->modifiers && a->reserved == b->reserved &&
+           memcmp(a->keys, b->keys, sizeof(a->keys)) == 0;
+}
+
+static void hid_device_keyboard_queue_push(device_state_t *state, const keyboard_state_t *value)
+{
+    if (!state || !value)
+    {
+        return;
+    }
+
+    if (state->keyboard_queue.count > 0)
+    {
+        size_t last_index = (state->keyboard_queue.head + state->keyboard_queue.count - 1) %
+                            HID_KEYBOARD_QUEUE_DEPTH;
+        if (keyboard_states_equal(&state->keyboard_queue.entries[last_index], value))
+        {
+            return;
+        }
+    }
+
+    if (state->keyboard_queue.count == HID_KEYBOARD_QUEUE_DEPTH)
+    {
+        ESP_LOGW(TAG, "Keyboard queue full, dropping oldest report");
+        state->keyboard_queue.head = (state->keyboard_queue.head + 1) % HID_KEYBOARD_QUEUE_DEPTH;
+        state->keyboard_queue.count--;
+    }
+
+    size_t tail = (state->keyboard_queue.head + state->keyboard_queue.count) %
+                  HID_KEYBOARD_QUEUE_DEPTH;
+    state->keyboard_queue.entries[tail] = *value;
+    state->keyboard_queue.count++;
+    state->keyboard_updated = true;
+}
+
+static keyboard_state_t *hid_device_keyboard_queue_peek(device_state_t *state)
+{
+    if (!state || state->keyboard_queue.count == 0)
+    {
+        return NULL;
+    }
+
+    return &state->keyboard_queue.entries[state->keyboard_queue.head];
+}
+
+static void hid_device_keyboard_queue_pop(device_state_t *state)
+{
+    if (!state || state->keyboard_queue.count == 0)
+    {
+        return;
+    }
+
+    state->keyboard_queue.head = (state->keyboard_queue.head + 1) % HID_KEYBOARD_QUEUE_DEPTH;
+    state->keyboard_queue.count--;
+    state->keyboard_updated = (state->keyboard_queue.count > 0);
+}
+
+static void hid_device_consumer_queue_push(device_state_t *state, uint16_t usage)
+{
+    if (!state)
+    {
+        return;
+    }
+
+    if (state->consumer_queue.count > 0)
+    {
+        size_t last_index = (state->consumer_queue.head + state->consumer_queue.count - 1) %
+                            HID_CONSUMER_QUEUE_DEPTH;
+        if (state->consumer_queue.entries[last_index] == usage)
+        {
+            return;
+        }
+    }
+
+    if (state->consumer_queue.count == HID_CONSUMER_QUEUE_DEPTH)
+    {
+        ESP_LOGW(TAG, "Consumer queue full, dropping oldest report");
+        state->consumer_queue.head = (state->consumer_queue.head + 1) % HID_CONSUMER_QUEUE_DEPTH;
+        state->consumer_queue.count--;
+    }
+
+    size_t tail = (state->consumer_queue.head + state->consumer_queue.count) %
+                  HID_CONSUMER_QUEUE_DEPTH;
+    state->consumer_queue.entries[tail] = usage;
+    state->consumer_queue.count++;
+    state->consumer_updated = true;
+}
+
+static uint16_t *hid_device_consumer_queue_peek(device_state_t *state)
+{
+    if (!state || state->consumer_queue.count == 0)
+    {
+        return NULL;
+    }
+
+    return &state->consumer_queue.entries[state->consumer_queue.head];
+}
+
+static void hid_device_consumer_queue_pop(device_state_t *state)
+{
+    if (!state || state->consumer_queue.count == 0)
+    {
+        return;
+    }
+
+    state->consumer_queue.head = (state->consumer_queue.head + 1) % HID_CONSUMER_QUEUE_DEPTH;
+    state->consumer_queue.count--;
+    state->consumer_updated = (state->consumer_queue.count > 0);
+}
+
 hid_device_t *hid_device_create(const char *device_name)
 {
     hid_device_t *device = calloc(1, sizeof(hid_device_t));
@@ -180,7 +350,7 @@ void hid_device_set_mouse_state(hid_device_t *device, const mouse_state_t *state
     if (device && state)
     {
         device->state.mouse = *state;
-        device->state.mouse_updated = true;
+        hid_device_mouse_queue_push(&device->state, state);
         hid_device_flush_reports(device, true, false, false);
     }
 }
@@ -190,7 +360,7 @@ void hid_device_set_keyboard_state(hid_device_t *device, const keyboard_state_t 
     if (device && state)
     {
         device->state.keyboard = *state;
-        device->state.keyboard_updated = true;
+        hid_device_keyboard_queue_push(&device->state, state);
         hid_device_flush_reports(device, false, true, false);
     }
 }
@@ -200,11 +370,43 @@ void hid_device_set_consumer_state(hid_device_t *device, const consumer_state_t 
     if (device && state)
     {
         device->state.consumer = *state;
-        device->state.consumer_updated = true;
-        if (!state->active)
+        if (state->active && state->usage != 0)
         {
-            device->state.consumer_pending_release = false;
+            uint16_t mask = ble_hid_consumer_usage_to_mask(state->usage);
+            if (mask == 0)
+            {
+                ESP_LOGW(TAG, "Ignoring unsupported consumer usage: 0x%04X", state->usage);
+                device->state.consumer_pending_release = false;
+                device->state.consumer_updated = (device->state.consumer_queue.count > 0);
+                return;
+            }
         }
+        if (state->active)
+        {
+            hid_device_consumer_queue_push(&device->state, state->usage);
+            if (state->hold)
+            {
+                device->state.consumer_pending_release = true;
+            }
+            else
+            {
+                device->state.consumer_pending_release = false;
+                hid_device_consumer_queue_push(&device->state, 0);
+            }
+        }
+        else
+        {
+            if (device->state.consumer_pending_release)
+            {
+                hid_device_consumer_queue_push(&device->state, 0);
+                device->state.consumer_pending_release = false;
+            }
+            else if (state->usage == 0)
+            {
+                hid_device_consumer_queue_push(&device->state, 0);
+            }
+        }
+        device->state.consumer_updated = (device->state.consumer_queue.count > 0);
         hid_device_flush_reports(device, false, false, true);
     }
 }
@@ -221,15 +423,17 @@ esp_err_t hid_device_notify_mouse(hid_device_t *device)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!device->state.mouse_updated)
+    mouse_state_t *pending = hid_device_mouse_queue_peek(&device->state);
+    if (!pending)
     {
+        device->state.mouse_updated = false;
         return ESP_OK;
     }
 
-    esp_err_t err = ble_hid_notify_mouse(&device->state.mouse);
+    esp_err_t err = ble_hid_notify_mouse(pending);
     if (err == ESP_OK)
     {
-        device->state.mouse_updated = false;
+        hid_device_mouse_queue_pop(&device->state);
     }
 
     return err;
@@ -242,15 +446,17 @@ esp_err_t hid_device_notify_keyboard(hid_device_t *device)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!device->state.keyboard_updated)
+    keyboard_state_t *pending = hid_device_keyboard_queue_peek(&device->state);
+    if (!pending)
     {
+        device->state.keyboard_updated = false;
         return ESP_OK;
     }
 
-    esp_err_t err = ble_hid_notify_keyboard(&device->state.keyboard);
+    esp_err_t err = ble_hid_notify_keyboard(pending);
     if (err == ESP_OK)
     {
-        device->state.keyboard_updated = false;
+        hid_device_keyboard_queue_pop(&device->state);
     }
 
     return err;
@@ -263,47 +469,24 @@ esp_err_t hid_device_notify_consumer(hid_device_t *device)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!device->state.consumer_pending_release && !device->state.consumer_updated)
+    uint16_t *usage = hid_device_consumer_queue_peek(&device->state);
+    if (!usage)
     {
+        device->state.consumer_updated = false;
         return ESP_OK;
     }
 
-    bool sending_release = device->state.consumer_pending_release;
-    uint16_t report_mask = 0;
-
-    if (!sending_release && device->state.consumer.active)
-    {
-        uint16_t requested = device->state.consumer.usage;
-        report_mask = ble_hid_consumer_usage_to_mask(requested);
-
-        if (requested != 0 && report_mask == 0)
-        {
-            ESP_LOGW(TAG, "Ignoring unsupported consumer usage: 0x%04X", requested);
-            device->state.consumer_updated = false;
-            device->state.consumer_pending_release = false;
-            return ESP_OK;
-        }
-    }
-
-    esp_err_t err = ble_hid_notify_consumer(report_mask);
+    esp_err_t err = ble_hid_notify_consumer(*usage);
     if (err != ESP_OK)
     {
         return err;
     }
 
-    if (sending_release)
+    hid_device_consumer_queue_pop(&device->state);
+
+    if (*usage == 0)
     {
         device->state.consumer_pending_release = false;
-        // Preserve consumer_updated in case a new event arrived while we were releasing.
-    }
-    else
-    {
-        if (device->state.consumer.active && !device->state.consumer.hold)
-        {
-            device->state.consumer_pending_release = true;
-            device->state.consumer.active = false;
-        }
-        device->state.consumer_updated = false;
     }
 
     return ESP_OK;
@@ -435,45 +618,58 @@ static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyb
 
     if (mouse)
     {
-        esp_err_t err = hid_device_notify_mouse(device);
-        if (err == ESP_ERR_NO_MEM)
+        while (device->state.mouse_updated)
         {
-            ESP_LOGW(TAG, "Mouse notify out of memory, scheduling retry");
-            device->state.mouse_updated = true;
-            hid_device_schedule_retry(device, true, false, false);
-        }
-        else if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to notify mouse report: %s", esp_err_to_name(err));
+            esp_err_t err = hid_device_notify_mouse(device);
+            if (err == ESP_OK)
+            {
+                continue;
+            }
+
+            if (err == ESP_ERR_NO_MEM)
+            {
+                ESP_LOGW(TAG, "Mouse notify out of memory, scheduling retry");
+                hid_device_schedule_retry(device, true, false, false);
+            }
+            else if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to notify mouse report: %s", esp_err_to_name(err));
+            }
+            break;
         }
     }
 
     if (keyboard)
     {
-        esp_err_t err = hid_device_notify_keyboard(device);
-        if (err == ESP_ERR_NO_MEM)
+        while (device->state.keyboard_updated)
         {
-            ESP_LOGW(TAG, "Keyboard notify out of memory, scheduling retry");
-            device->state.keyboard_updated = true;
-            hid_device_schedule_retry(device, false, true, false);
-        }
-        else if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to notify keyboard report: %s", esp_err_to_name(err));
+            esp_err_t err = hid_device_notify_keyboard(device);
+            if (err == ESP_OK)
+            {
+                continue;
+            }
+
+            if (err == ESP_ERR_NO_MEM)
+            {
+                ESP_LOGW(TAG, "Keyboard notify out of memory, scheduling retry");
+                hid_device_schedule_retry(device, false, true, false);
+            }
+            else if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to notify keyboard report: %s", esp_err_to_name(err));
+            }
+            break;
         }
     }
 
     if (consumer)
     {
-        int attempts = 0;
-        while (attempts < 2 &&
-               (device->state.consumer_updated || device->state.consumer_pending_release))
+        while (device->state.consumer_updated)
         {
             esp_err_t err = hid_device_notify_consumer(device);
             if (err == ESP_ERR_NO_MEM)
             {
                 ESP_LOGW(TAG, "Consumer notify out of memory, scheduling retry");
-                device->state.consumer_updated = true;
                 hid_device_schedule_retry(device, false, false, true);
                 break;
             }
@@ -481,13 +677,6 @@ static void hid_device_flush_reports(hid_device_t *device, bool mouse, bool keyb
             {
                 ESP_LOGE(TAG, "Failed to notify consumer report: %s", esp_err_to_name(err));
                 break;
-            }
-
-            attempts++;
-
-            if (device->state.consumer_pending_release || device->state.consumer_updated)
-            {
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
     }
