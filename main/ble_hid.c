@@ -359,16 +359,26 @@ uint16_t ble_hid_consumer_usage_to_mask(uint16_t usage)
     return 0;
 }
 
+void ble_hid_consumer_mask_to_report(uint16_t mask, uint8_t report[2])
+{
+    if (!report)
+    {
+        return;
+    }
+
+    // Match the little-endian MediaKeyReport layout used by BlynkGO.
+    report[0] = (uint8_t)(mask & 0xFF);
+    report[1] = (uint8_t)((mask >> 8) & 0xFF);
+}
+
 static int consumer_report_access(uint16_t conn_handle, uint16_t attr_handle,
                                   struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR)
     {
         // Keep the readback order consistent with the notification payload
-        uint8_t report[2] = {
-            (uint8_t)(s_consumer_report & 0xFF),
-            (uint8_t)((s_consumer_report >> 8) & 0xFF)
-        };
+        uint8_t report[2];
+        ble_hid_consumer_mask_to_report(s_consumer_report, report);
         return os_mbuf_append(ctxt->om, report, sizeof(report));
     }
     return BLE_ATT_ERR_UNLIKELY;
@@ -1102,10 +1112,13 @@ esp_err_t ble_hid_notify_consumer(uint16_t usage_mask)
 
     s_consumer_report = report_mask;
 
+    uint8_t payload[2];
+    ble_hid_consumer_mask_to_report(report_mask, payload);
+
     uint8_t report[3];
     report[0] = 0x03; // Report ID
-    report[1] = report_mask & 0xFF;
-    report[2] = (report_mask >> 8) & 0xFF;
+    report[1] = payload[0];
+    report[2] = payload[1];
 
     return ble_hid_send_notification(s_handles.consumer_input_handle, report, sizeof(report));
 }

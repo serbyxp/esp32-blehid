@@ -145,14 +145,27 @@ class ConsumerUsageMaskTest(unittest.TestCase):
         if func_src is None:
             raise AssertionError("Failed to locate consumer usage helper")
 
+        pack_src = re.search(
+            r"void\s+ble_hid_consumer_mask_to_report\(uint16_t mask,\s*uint8_t report\[2\]\)\s*\{.*?\n\}",
+            cls.source_text,
+            re.DOTALL,
+        )
+        if pack_src is None:
+            raise AssertionError("Failed to locate consumer report helper")
+
         helper_code = textwrap.dedent(
             """
             #include <stdint.h>
             #include <stddef.h>
             {array}
             {function}
+            {pack}
             """
-        ).format(array=array_src.group(0), function=func_src.group(0))
+        ).format(
+            array=array_src.group(0),
+            function=func_src.group(0),
+            pack=pack_src.group(0),
+        )
 
         cls._tmpdir = tempfile.TemporaryDirectory()
         c_path = Path(cls._tmpdir.name) / "consumer_mask.c"
@@ -168,6 +181,11 @@ class ConsumerUsageMaskTest(unittest.TestCase):
         cls.lib = ctypes.CDLL(str(so_path))
         cls.lib.ble_hid_consumer_usage_to_mask.argtypes = [ctypes.c_uint16]
         cls.lib.ble_hid_consumer_usage_to_mask.restype = ctypes.c_uint16
+        cls.lib.ble_hid_consumer_mask_to_report.argtypes = [
+            ctypes.c_uint16,
+            ctypes.POINTER(ctypes.c_uint8),
+        ]
+        cls.lib.ble_hid_consumer_mask_to_report.restype = None
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -201,6 +219,16 @@ class ConsumerUsageMaskTest(unittest.TestCase):
 
     def test_mail_maps_to_high_byte_bit(self) -> None:
         self._assert_usage_maps_to_expected_bit(0x018A)
+
+    def test_play_pause_report_sets_only_play_bit(self) -> None:
+        mask = self.lib.ble_hid_consumer_usage_to_mask(0x00CD)
+        self.assertEqual(mask, 0x0008)
+
+        report = (ctypes.c_uint8 * 2)()
+        self.lib.ble_hid_consumer_mask_to_report(mask, report)
+
+        self.assertEqual(report[0], 0x08)
+        self.assertEqual(report[1], 0x00)
 
 if __name__ == "__main__":
     unittest.main()

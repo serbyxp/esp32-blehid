@@ -54,6 +54,7 @@ esp_err_t ble_hid_stop_advertising(void);
 esp_err_t ble_hid_notify_mouse(const mouse_state_t *state);
 esp_err_t ble_hid_notify_keyboard(const keyboard_state_t *state);
 uint16_t ble_hid_consumer_usage_to_mask(uint16_t usage);
+void ble_hid_consumer_mask_to_report(uint16_t mask, uint8_t report[2]);
 esp_err_t ble_hid_notify_consumer(uint16_t usage_mask);
 
 // Connection state
