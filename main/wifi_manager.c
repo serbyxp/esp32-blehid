@@ -427,6 +427,135 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     return ESP_OK;
 }
 
+esp_err_t wifi_manager_enable_apsta(void)
+{
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK)
+    {
+        if (err != ESP_ERR_WIFI_NOT_INIT)
+        {
+            ESP_LOGE(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    if (!s_sta_netif)
+    {
+        s_sta_netif = esp_netif_create_default_wifi_sta();
+        if (!s_sta_netif)
+        {
+            ESP_LOGE(TAG, "Failed to create STA netif for APSTA transition");
+            return ESP_FAIL;
+        }
+
+        esp_err_t host_err = esp_netif_set_hostname(s_sta_netif, s_hostname);
+        if (host_err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "Failed to set STA hostname during APSTA transition: %s", esp_err_to_name(host_err));
+        }
+    }
+
+    if (mode == WIFI_MODE_AP)
+    {
+        ESP_LOGI(TAG, "Enabling APSTA mode to keep AP active during STA connect");
+        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (err == ESP_OK)
+        {
+            s_current_mode = WIFI_MODE_APSTA;
+            http_server_publish_wifi_status();
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to enable APSTA mode: %s", esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    if (mode != WIFI_MODE_APSTA)
+    {
+        ESP_LOGD(TAG, "APSTA enable requested while in mode %d", mode);
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t wifi_manager_disable_ap(void)
+{
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK)
+    {
+        if (err != ESP_ERR_WIFI_NOT_INIT)
+        {
+            ESP_LOGE(TAG, "esp_wifi_get_mode failed while disabling AP: %s", esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    if (mode == WIFI_MODE_APSTA || mode == WIFI_MODE_AP)
+    {
+        ESP_LOGI(TAG, "Disabling AP interface after STA connection");
+        err = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (err == ESP_OK)
+        {
+            s_current_mode = WIFI_MODE_STA;
+            http_server_publish_wifi_status();
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to disable AP interface: %s", esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t wifi_manager_restore_ap_mode(void)
+{
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK)
+    {
+        if (err != ESP_ERR_WIFI_NOT_INIT)
+        {
+            ESP_LOGE(TAG, "esp_wifi_get_mode failed while restoring AP: %s", esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    if (mode == WIFI_MODE_AP)
+    {
+        return ESP_OK;
+    }
+
+    if (mode == WIFI_MODE_APSTA || mode == WIFI_MODE_STA)
+    {
+        ESP_LOGI(TAG, "Restoring AP-only mode after STA failure");
+        esp_wifi_disconnect();
+        err = esp_wifi_set_mode(WIFI_MODE_AP);
+        if (err == ESP_OK)
+        {
+            s_current_mode = WIFI_MODE_AP;
+            s_wifi_connected = false;
+            s_sta_retry_count = 0;
+            if (s_sta_retry_timer)
+            {
+                xTimerStop(s_sta_retry_timer, 0);
+            }
+            http_server_publish_wifi_status();
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to restore AP-only mode: %s", esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t wifi_manager_start_scan(wifi_scan_callback_t callback)
 {
     if (s_scanning)

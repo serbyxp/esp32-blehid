@@ -24,6 +24,9 @@ typedef void (*wifi_scan_callback_t)(const wifi_ap_record_t *records, uint16_t c
 esp_err_t wifi_manager_init(void);
 esp_err_t wifi_manager_start_ap(const char *ssid, const char *password);
 esp_err_t wifi_manager_start_sta(const char *ssid, const char *password);
+esp_err_t wifi_manager_enable_apsta(void);
+esp_err_t wifi_manager_disable_ap(void);
+esp_err_t wifi_manager_restore_ap_mode(void);
 esp_err_t wifi_manager_start_scan(wifi_scan_callback_t callback);
 esp_err_t wifi_manager_stop_scan(void);
 esp_err_t wifi_manager_stop(void);
