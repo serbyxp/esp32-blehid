@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "wifi_credentials.h"
 #include "http_server.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -661,6 +662,22 @@ esp_err_t wifi_manager_get_mac_str(wifi_interface_t iface, char *mac_str, size_t
 
 esp_err_t wifi_manager_save_config(const char *ssid, const char *password)
 {
+    if (!ssid)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wifi_credentials_error_t cred_err = wifi_credentials_validate(ssid, password);
+    if (cred_err != WIFI_CREDENTIALS_OK)
+    {
+        ESP_LOGW(TAG,
+                 "Rejecting WiFi config: ssid_len=%zu psk_len=%zu reason=%s",
+                 wifi_credentials_ssid_length(ssid),
+                 wifi_credentials_psk_length(password),
+                 wifi_credentials_error_to_string(cred_err));
+        return ESP_ERR_INVALID_ARG;
+    }
+
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_WIFI_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK)

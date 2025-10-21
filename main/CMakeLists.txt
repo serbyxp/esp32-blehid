@@ -7,6 +7,7 @@ idf_component_register(
         "transport_uart.c"
         "transport_ws.c"
         "ws_ascii.c"
+        "wifi_credentials.c"
         "wifi_manager.c"
         "nvs_keystore.c"
         "http_server.c"
