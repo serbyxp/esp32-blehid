@@ -35,6 +35,70 @@ static struct
     bool hwheel_hold;
 } g_remote_state = {0};
 
+static const char *const s_consumer_usage_labels[] = {
+    "Next Track",
+    "Previous Track",
+    "Stop",
+    "Play/Pause",
+    "Mute",
+    "Volume Up",
+    "Volume Down",
+    "WWW Home",
+    "My Computer",
+    "Calculator",
+    "WWW Favorites",
+    "WWW Search",
+    "WWW Stop",
+    "WWW Back",
+    "Media Select",
+    "Mail",
+};
+
+static int consumer_mask_to_index(uint16_t mask)
+{
+    if (mask == 0 || (mask & (mask - 1)) != 0)
+    {
+        return -1;
+    }
+
+    int index = 0;
+    while ((mask & 0x1u) == 0)
+    {
+        mask >>= 1;
+        ++index;
+    }
+
+    return index;
+}
+
+static void log_consumer_usage_mapping(uint16_t usage, uint16_t mask, bool active, bool hold)
+{
+    int bit = consumer_mask_to_index(mask);
+    const char *label = "Unknown";
+
+    if (usage == 0 && mask == 0)
+    {
+        label = "None";
+    }
+    else if (bit >= 0)
+    {
+        size_t label_count = sizeof(s_consumer_usage_labels) / sizeof(s_consumer_usage_labels[0]);
+        if ((size_t)bit < label_count)
+        {
+            label = s_consumer_usage_labels[bit];
+        }
+    }
+
+    ESP_LOGI(TAG,
+             "Consumer usage %s: usage=0x%04X mask=0x%04X bit=%d active=%s hold=%s",
+             label,
+             usage,
+             mask,
+             bit,
+             active ? "true" : "false",
+             hold ? "true" : "false");
+}
+
 static void populate_wifi_status_json(cJSON *obj)
 {
     if (!obj)
@@ -303,6 +367,9 @@ static void on_consumer_input(const consumer_state_t *state)
 
     uint16_t raw_usage = normalized.usage;
     uint16_t usage_mask = ble_hid_consumer_usage_to_mask(raw_usage);
+
+    log_consumer_usage_mapping(raw_usage, usage_mask, normalized.active, normalized.hold);
+
     if (raw_usage != 0 && usage_mask == 0)
     {
         ESP_LOGW(TAG, "Unsupported consumer usage request: 0x%04X", raw_usage);
