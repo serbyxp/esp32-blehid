@@ -241,39 +241,47 @@ static esp_err_t portal_page_handler(httpd_req_t *req)
     const char *hostname = wifi_manager_get_hostname();
     char host_url[96] = {0};
     char ip_fallback[16] = {0};
+    char fallback_url[64] = {0};
 
     if (hostname && strlen(hostname) > 0)
     {
         snprintf(host_url, sizeof(host_url), "http://%s.local/", hostname);
-    }
-    else
-    {
-        strncpy(host_url, "http://192.168.4.1/", sizeof(host_url) - 1);
     }
 
     if (wifi_manager_get_ip(ip_fallback, sizeof(ip_fallback)) != ESP_OK || strlen(ip_fallback) == 0)
     {
         strncpy(ip_fallback, "192.168.4.1", sizeof(ip_fallback) - 1);
     }
+    snprintf(fallback_url, sizeof(fallback_url), "http://%s/", ip_fallback);
 
-    httpd_resp_set_status(req, "200 OK");
+    const char *redirect_target = strlen(host_url) > 0 ? host_url : fallback_url;
+
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", redirect_target);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_set_type(req, "text/html");
 
     httpd_resp_sendstr_chunk(req, "<!DOCTYPE html><html><head>"
+                                  "<title>Captive Portal</title>"
                                   "<meta http-equiv=\"refresh\" content=\"0; url=");
-    httpd_resp_send_chunk(req, host_url, strlen(host_url));
-    httpd_resp_sendstr_chunk(req, "\">"
-                                  "<title>Captive Portal</title></head>"
-                                  "<body style=\"font-family:sans-serif;text-align:center;padding:40px;\">"
-                                  "<h2>ESP32 Control Portal</h2>"
-                                  "<p>If you are not redirected automatically, <a href=\"");
-    httpd_resp_send_chunk(req, host_url, strlen(host_url));
-    httpd_resp_sendstr_chunk(req, "\">open the dashboard</a>.</p>"
-                                  "<p>Fallback: <a href=\"http://");
-    httpd_resp_send_chunk(req, ip_fallback, strlen(ip_fallback));
-    httpd_resp_sendstr_chunk(req, "/\">http://");
-    httpd_resp_send_chunk(req, ip_fallback, strlen(ip_fallback));
-    httpd_resp_sendstr_chunk(req, "/</a></p></body></html>");
+    httpd_resp_send_chunk(req, redirect_target, strlen(redirect_target));
+    httpd_resp_sendstr_chunk(req, "\"></head><body style=\"font-family:sans-serif;text-align:center;padding:40px;\">"
+                                  "<h2>ESP32 Control Portal</h2>");
+
+    if (strlen(host_url) > 0)
+    {
+        httpd_resp_sendstr_chunk(req, "<p>Redirecting to <a href=\"");
+        httpd_resp_send_chunk(req, host_url, strlen(host_url));
+        httpd_resp_sendstr_chunk(req, "\">");
+        httpd_resp_send_chunk(req, host_url, strlen(host_url));
+        httpd_resp_sendstr_chunk(req, "</a>.</p>");
+    }
+
+    httpd_resp_sendstr_chunk(req, "<p>If the redirect fails, try <a href=\"");
+    httpd_resp_send_chunk(req, fallback_url, strlen(fallback_url));
+    httpd_resp_sendstr_chunk(req, "\">");
+    httpd_resp_send_chunk(req, fallback_url, strlen(fallback_url));
+    httpd_resp_sendstr_chunk(req, "</a>.</p></body></html>");
 
     httpd_resp_sendstr_chunk(req, NULL);
     return ESP_OK;

@@ -848,7 +848,10 @@ static int ble_hid_gap_event(struct ble_gap_event *event, void *arg)
                 {
                     addr = &desc.peer_ota_addr;
                 }
-                memcpy(s_conn_info.peer_addr, addr->val, sizeof(s_conn_info.peer_addr));
+                for (int i = 0; i < 6; ++i)
+                {
+                    s_conn_info.peer_addr[i] = addr->val[5 - i];
+                }
                 s_conn_info.peer_addr_type = addr->type;
                 s_conn_info.bonded = desc.sec_state.bonded;
                 s_conn_info.encrypted = desc.sec_state.encrypted;
