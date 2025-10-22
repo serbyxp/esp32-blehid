@@ -14,15 +14,19 @@ idf_component_register(
         "dns_server.c"
         "hid_keymap.c"
     INCLUDE_DIRS "."
-    REQUIRES 
+    REQUIRES
         nvs_flash
         esp_wifi
         esp_netif
         esp_http_server
-        mdns
         bt
         driver
         json
     EMBED_FILES
         "web/index.html"
 )
+
+idf_build_get_component(mdns_component mdns)
+if(mdns_component)
+    target_link_libraries(${COMPONENT_LIB} PUBLIC ${mdns_component})
+endif()
