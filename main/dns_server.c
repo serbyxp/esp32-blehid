@@ -40,6 +40,7 @@ static void dns_server_task(void *pvParameters)
 
     while (s_running)
     {
+        client_addr_len = sizeof(client_addr);
         int len = recvfrom(s_sock, rx_buffer, sizeof(rx_buffer) - 1, 0,
                            (struct sockaddr *)&client_addr, &client_addr_len);
 
@@ -50,6 +51,12 @@ static void dns_server_task(void *pvParameters)
             // Only respond to queries
             if ((ntohs(header->flags) & 0x8000) == 0)
             {
+                if ((size_t)len + 16 > sizeof(tx_buffer))
+                {
+                    ESP_LOGW(TAG, "DNS request too large (%d bytes)", len);
+                    continue;
+                }
+
                 // Build response
                 memcpy(tx_buffer, rx_buffer, len);
                 dns_header_t *resp_header = (dns_header_t *)tx_buffer;

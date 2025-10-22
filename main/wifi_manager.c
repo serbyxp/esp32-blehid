@@ -46,6 +46,36 @@ static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 static TimerHandle_t s_sta_retry_timer = NULL;
 
+#if WIFI_MANAGER_HAS_MDNS
+static bool s_mdns_ap_registered = false;
+static bool s_mdns_sta_registered = false;
+
+static void wifi_manager_register_mdns_netif(esp_netif_t *netif, bool *registered_flag)
+{
+    if (!netif || !registered_flag || *registered_flag)
+    {
+        return;
+    }
+
+    const char *if_key = esp_netif_get_ifkey(netif);
+    esp_err_t err = mdns_register_netif(netif);
+    if (err == ESP_OK)
+    {
+        ESP_LOGI(TAG, "Registered %s for mDNS", if_key ? if_key : "netif");
+        *registered_flag = true;
+    }
+    else if (err == ESP_ERR_INVALID_STATE)
+    {
+        // Already registered – treat as success.
+        *registered_flag = true;
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Failed to register %s for mDNS: %s", if_key ? if_key : "netif", esp_err_to_name(err));
+    }
+}
+#endif
+
 #define MAX_STA_RETRY 5
 #define STA_RETRY_DELAY_MS 5000
 
@@ -344,6 +374,19 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
         s_ap_netif = esp_netif_create_default_wifi_ap();
     }
 
+#if WIFI_MANAGER_HAS_MDNS
+    wifi_manager_register_mdns_netif(s_ap_netif, &s_mdns_ap_registered);
+#endif
+
+    if (s_ap_netif)
+    {
+        esp_err_t host_err = esp_netif_set_hostname(s_ap_netif, s_hostname);
+        if (host_err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "Failed to set AP hostname: %s", esp_err_to_name(host_err));
+        }
+    }
+
     if (!s_ap_netif)
     {
         ESP_LOGE(TAG, "Failed to create AP netif");
@@ -463,8 +506,16 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
         return ESP_FAIL;
     }
 
-    // Set hostname for DHCP
-    ESP_ERROR_CHECK(esp_netif_set_hostname(s_sta_netif, s_hostname));
+    // Ensure hostname set for DHCP
+    esp_err_t host_err = esp_netif_set_hostname(s_sta_netif, s_hostname);
+    if (host_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Failed to set STA hostname: %s", esp_err_to_name(host_err));
+    }
+
+#if WIFI_MANAGER_HAS_MDNS
+    wifi_manager_register_mdns_netif(s_sta_netif, &s_mdns_sta_registered);
+#endif
 
     wifi_config_t wifi_config = {0};
     strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
@@ -560,6 +611,9 @@ esp_err_t wifi_manager_enable_apsta(void)
         {
             ESP_LOGW(TAG, "Failed to set STA hostname during APSTA transition: %s", esp_err_to_name(host_err));
         }
+#if WIFI_MANAGER_HAS_MDNS
+        wifi_manager_register_mdns_netif(s_sta_netif, &s_mdns_sta_registered);
+#endif
     }
 
     if (mode == WIFI_MODE_AP)
@@ -708,7 +762,18 @@ esp_err_t wifi_manager_start_scan(wifi_scan_callback_t callback)
                 s_scan_callback = NULL;
                 return ESP_FAIL;
             }
-            ESP_ERROR_CHECK(esp_netif_set_hostname(s_sta_netif, s_hostname));
+#if WIFI_MANAGER_HAS_MDNS
+            wifi_manager_register_mdns_netif(s_sta_netif, &s_mdns_sta_registered);
+#endif
+        }
+
+        if (s_sta_netif)
+        {
+            esp_err_t host_err = esp_netif_set_hostname(s_sta_netif, s_hostname);
+            if (host_err != ESP_OK)
+            {
+                ESP_LOGW(TAG, "Failed to set STA hostname for scan: %s", esp_err_to_name(host_err));
+            }
         }
 
         esp_wifi_disconnect();
