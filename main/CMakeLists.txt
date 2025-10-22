@@ -26,7 +26,6 @@ idf_component_register(
         "web/index.html"
 )
 
-idf_build_get_component(mdns_component mdns)
-if(mdns_component)
-    target_link_libraries(${COMPONENT_LIB} PUBLIC ${mdns_component})
+if(TARGET mdns)
+    target_link_libraries(${COMPONENT_LIB} PUBLIC mdns)
 endif()
