@@ -855,7 +855,6 @@ void app_main(void)
         has_saved_config = true;
     }
 
-    bool wifi_status_changed = false;
     if (has_saved_config)
     {
         ESP_LOGI(TAG, "Connecting to saved WiFi: %s", ssid);
@@ -863,7 +862,7 @@ void app_main(void)
         esp_err_t sta_err = wifi_manager_start_sta(ssid, pass);
         if (sta_err == ESP_OK)
         {
-            wifi_status_changed = true;
+            notify_wifi_status();
         }
         else
         {
@@ -873,7 +872,7 @@ void app_main(void)
             if (ap_err == ESP_OK)
             {
                 ESP_LOGI(TAG, "AP mode active after STA start failure: %s", wifi_manager_get_ap_ssid());
-                wifi_status_changed = true;
+                notify_wifi_status();
             }
             else
             {
@@ -887,17 +886,12 @@ void app_main(void)
         if (ap_err == ESP_OK)
         {
             ESP_LOGI(TAG, "AP mode active: %s", wifi_manager_get_ap_ssid());
-            wifi_status_changed = true;
+            notify_wifi_status();
         }
         else
         {
             ESP_LOGE(TAG, "Failed to start AP mode: %s", esp_err_to_name(ap_err));
         }
-    }
-
-    if (wifi_status_changed)
-    {
-        notify_wifi_status();
     }
 
     // Initialize transports
