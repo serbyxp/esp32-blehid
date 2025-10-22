@@ -8,10 +8,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/param.h>
+#include <stdbool.h>
 
 static const char *TAG = "HTTP_SERVER";
 
 static httpd_handle_t s_server = NULL;
+static bool s_captive_portal_enabled = false;
 extern const char html_start[] asm("_binary_index_html_start");
 extern const char html_end[] asm("_binary_index_html_end");
 
@@ -337,17 +339,14 @@ esp_err_t http_server_start(uint16_t port)
     httpd_register_uri_handler(s_server, &success_uri);
 
     ESP_LOGI(TAG, "HTTP server started on port %d", port);
-    ESP_LOGI(TAG, "Captive portal ready");
-
-    // Start DNS server for captive portal
-    dns_server_start();
+    s_captive_portal_enabled = false;
 
     return ESP_OK;
 }
 
 esp_err_t http_server_stop(void)
 {
-    dns_server_stop();
+    http_server_disable_captive_portal();
 
     if (s_server)
     {
@@ -356,4 +355,53 @@ esp_err_t http_server_stop(void)
         ESP_LOGI(TAG, "HTTP server stopped");
     }
     return ESP_OK;
+}
+
+esp_err_t http_server_enable_captive_portal(void)
+{
+    if (!s_server)
+    {
+        ESP_LOGW(TAG, "Cannot enable captive portal before HTTP server start");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_captive_portal_enabled)
+    {
+        return ESP_OK;
+    }
+
+    esp_err_t err = dns_server_start();
+    if (err == ESP_OK)
+    {
+        s_captive_portal_enabled = true;
+        ESP_LOGI(TAG, "Captive portal enabled");
+    }
+    else if (err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGE(TAG, "Failed to start DNS server for captive portal: %s", esp_err_to_name(err));
+    }
+
+    return err;
+}
+
+esp_err_t http_server_disable_captive_portal(void)
+{
+    if (!s_captive_portal_enabled)
+    {
+        return ESP_OK;
+    }
+
+    esp_err_t err = dns_server_stop();
+    if (err == ESP_OK)
+    {
+        ESP_LOGI(TAG, "Captive portal disabled");
+    }
+    else if (err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGE(TAG, "Failed to stop DNS server: %s", esp_err_to_name(err));
+    }
+
+    s_captive_portal_enabled = false;
+
+    return err;
 }

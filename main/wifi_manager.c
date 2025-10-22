@@ -121,7 +121,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         case WIFI_REASON_AUTH_FAIL:
         case WIFI_REASON_AUTH_EXPIRE:
         case WIFI_REASON_NO_AP_FOUND:
-        case WIFI_REASON_ASSOC_FAIL:
 #ifdef WIFI_REASON_HANDSHAKE_TIMEOUT
         case WIFI_REASON_HANDSHAKE_TIMEOUT:
 #endif
@@ -150,7 +149,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         else if (s_sta_retry_count < MAX_STA_RETRY)
         {
             s_sta_retry_count++;
-            ESP_LOGI(TAG, "Retry %d/%d in %dms", s_sta_retry_count, MAX_STA_RETRY, STA_RETRY_DELAY_MS);
+            ESP_LOGI(TAG, "Retry %d/%d in %dms (reason %d)",
+                     s_sta_retry_count, MAX_STA_RETRY, STA_RETRY_DELAY_MS, event->reason);
             if (s_sta_retry_timer)
             {
                 if (xTimerIsTimerActive(s_sta_retry_timer) == pdTRUE)
@@ -330,7 +330,7 @@ esp_err_t wifi_manager_init(void)
     ESP_ERROR_CHECK(mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0));
     ESP_ERROR_CHECK(mdns_service_add(NULL, "_ws", "_tcp", 8765, NULL, 0));
 #else
-    ESP_LOGW(TAG, "mDNS support not available (mdns component missing)");
+    ESP_LOGI(TAG, "mDNS support disabled (mdns component not included in build)");
 #endif
 
     ESP_LOGI(TAG, "WiFi manager initialized, mDNS hostname: %s.local", s_hostname);
@@ -438,6 +438,12 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
     {
         ESP_LOGI(TAG, "AP started: SSID=%s, IP=192.168.4.1", s_ap_ssid);
         ESP_LOGI(TAG, "Access via: http://%s.local or http://192.168.4.1", s_hostname);
+    }
+
+    esp_err_t portal_err = http_server_enable_captive_portal();
+    if (portal_err != ESP_OK && portal_err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGW(TAG, "Failed to enable captive portal: %s", esp_err_to_name(portal_err));
     }
 
     http_server_publish_wifi_status();
@@ -601,6 +607,11 @@ esp_err_t wifi_manager_disable_ap(void)
         {
             s_current_mode = WIFI_MODE_STA;
             http_server_publish_wifi_status();
+            esp_err_t portal_err = http_server_disable_captive_portal();
+            if (portal_err != ESP_OK && portal_err != ESP_ERR_INVALID_STATE)
+            {
+                ESP_LOGW(TAG, "Failed to disable captive portal: %s", esp_err_to_name(portal_err));
+            }
         }
         else
         {
@@ -645,6 +656,11 @@ esp_err_t wifi_manager_restore_ap_mode(void)
                 xTimerStop(s_sta_retry_timer, 0);
             }
             http_server_publish_wifi_status();
+            esp_err_t portal_err = http_server_enable_captive_portal();
+            if (portal_err != ESP_OK && portal_err != ESP_ERR_INVALID_STATE)
+            {
+                ESP_LOGW(TAG, "Failed to enable captive portal after STA failure: %s", esp_err_to_name(portal_err));
+            }
         }
         else
         {

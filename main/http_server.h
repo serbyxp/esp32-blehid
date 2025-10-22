@@ -11,5 +11,7 @@ esp_err_t http_server_start(uint16_t port);
 esp_err_t http_server_stop(void);
 void http_server_publish_wifi_status(void);
 void http_server_publish_scan_results(const wifi_ap_record_t *records, uint16_t count);
+esp_err_t http_server_enable_captive_portal(void);
+esp_err_t http_server_disable_captive_portal(void);
 
 #endif // HTTP_SERVER_H
