@@ -19,13 +19,10 @@ idf_component_register(
         esp_wifi
         esp_netif
         esp_http_server
+        mdns
         bt
         driver
         json
     EMBED_FILES
         "web/index.html"
 )
-
-if(TARGET mdns)
-    target_link_libraries(${COMPONENT_LIB} PUBLIC mdns)
-endif()
