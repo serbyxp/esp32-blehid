@@ -2,6 +2,7 @@
 #define WIFI_MANAGER_H
 
 #include "esp_err.h"
+#include "esp_event.h"
 #include "esp_wifi_types.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -48,5 +49,14 @@ esp_err_t wifi_manager_load_config(char *ssid, size_t ssid_len,
                                    char *password, size_t pass_len);
 esp_err_t wifi_manager_clear_config(void);
 bool wifi_manager_has_stored_config(void);
+
+#ifdef UNIT_TEST
+void wifi_manager_test_reset_state(void);
+void wifi_manager_test_set_state(bool scanning, bool restore_ap_on_scan, wifi_mode_t mode);
+bool wifi_manager_test_get_deferred_ap_restore(void);
+void wifi_manager_test_invoke_event(esp_event_base_t base, int32_t event_id, void *event_data);
+void wifi_manager_test_invoke_wifi_event(int32_t event_id, void *event_data);
+void wifi_manager_test_invoke_ip_event(int32_t event_id, void *event_data);
+#endif
 
 #endif // WIFI_MANAGER_H
