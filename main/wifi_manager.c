@@ -171,9 +171,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             ESP_LOGW(TAG, "Connection failed (reason %d), restoring AP-only mode", event->reason);
             stop_sta_retry_timer();
             s_sta_retry_count = 0;
-            if (wifi_manager_restore_ap_mode() != ESP_OK)
+            esp_err_t restore_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+            if (restore_err != ESP_OK)
             {
-                ESP_LOGE(TAG, "Failed to restore AP-only mode after disconnection");
+                ESP_LOGE(TAG, "Failed to start fallback AP after disconnection: %s", esp_err_to_name(restore_err));
             }
         }
         else if (s_sta_retry_count < MAX_STA_RETRY)
