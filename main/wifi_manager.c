@@ -122,8 +122,10 @@ static bool wifi_manager_wait_for_sta_connection(TickType_t timeout_ticks, bool 
         return true;
     }
 
-    TickType_t start = xTaskGetTickCount();
     const TickType_t poll_interval = pdMS_TO_TICKS(100);
+    TickType_t last_activity = xTaskGetTickCount();
+    int last_retry_count = s_sta_retry_count;
+    bool last_connecting = s_sta_connecting;
 
     while (true)
     {
@@ -142,7 +144,14 @@ static bool wifi_manager_wait_for_sta_connection(TickType_t timeout_ticks, bool 
             break;
         }
 
-        TickType_t elapsed = xTaskGetTickCount() - start;
+        if (s_sta_retry_count != last_retry_count || s_sta_connecting != last_connecting)
+        {
+            last_activity = xTaskGetTickCount();
+            last_retry_count = s_sta_retry_count;
+            last_connecting = s_sta_connecting;
+        }
+
+        TickType_t elapsed = xTaskGetTickCount() - last_activity;
         if (elapsed >= timeout_ticks)
         {
             if (timed_out)
@@ -160,12 +169,6 @@ static bool wifi_manager_wait_for_sta_connection(TickType_t timeout_ticks, bool 
         }
 
         vTaskDelay(delay_ticks);
-    }
-
-    if (!s_wifi_connected && timed_out && timeout_ticks > 0 && !*timed_out &&
-        (xTaskGetTickCount() - start) >= timeout_ticks)
-    {
-        *timed_out = true;
     }
 
     return s_wifi_connected;
@@ -1552,5 +1555,17 @@ void wifi_manager_test_invoke_wifi_event(int32_t event_id, void *event_data)
 void wifi_manager_test_invoke_ip_event(int32_t event_id, void *event_data)
 {
     wifi_event_handler(NULL, IP_EVENT, event_id, event_data);
+}
+
+bool wifi_manager_test_wait_for_sta_connection(TickType_t timeout_ticks, bool *timed_out)
+{
+    return wifi_manager_wait_for_sta_connection(timeout_ticks, timed_out);
+}
+
+void wifi_manager_test_set_connection_flags(bool connected, bool connecting, int retry_count)
+{
+    s_wifi_connected = connected;
+    s_sta_connecting = connecting;
+    s_sta_retry_count = retry_count;
 }
 #endif

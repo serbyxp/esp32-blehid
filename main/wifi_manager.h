@@ -75,6 +75,8 @@ bool wifi_manager_test_get_deferred_ap_restore(void);
 void wifi_manager_test_invoke_event(esp_event_base_t base, int32_t event_id, void *event_data);
 void wifi_manager_test_invoke_wifi_event(int32_t event_id, void *event_data);
 void wifi_manager_test_invoke_ip_event(int32_t event_id, void *event_data);
+bool wifi_manager_test_wait_for_sta_connection(TickType_t timeout_ticks, bool *timed_out);
+void wifi_manager_test_set_connection_flags(bool connected, bool connecting, int retry_count);
 #endif
 
 #endif // WIFI_MANAGER_H

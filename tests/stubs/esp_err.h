@@ -15,6 +15,7 @@ typedef int esp_err_t;
 #define ESP_ERR_WIFI_NOT_STOPPED 0x202
 #define ESP_ERR_WIFI_STATE 0x203
 #define ESP_ERR_WIFI_CONN 0x204
+#define ESP_ERR_TIMEOUT 0x205
 #define ESP_ERR_NVS_NOT_FOUND 0x300
 #define ESP_ERR_NOT_FOUND 0x301
 
