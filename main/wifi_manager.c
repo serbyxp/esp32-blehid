@@ -44,6 +44,7 @@ static bool s_sta_connecting = false;
 static bool s_scanning = false;
 static wifi_scan_callback_t s_scan_callback = NULL;
 static bool s_restore_ap_on_scan = false;
+static bool s_keep_ap_during_sta = false;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 static TimerHandle_t s_sta_retry_timer = NULL;
@@ -508,6 +509,7 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
     }
 
     s_current_mode = target_mode;
+    s_keep_ap_during_sta = keep_sta_active;
     if (!keep_sta_active)
     {
         s_wifi_connected = false;
@@ -576,27 +578,20 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
 
-    wifi_mode_t mode = WIFI_MODE_NULL;
-    esp_err_t mode_err = esp_wifi_get_mode(&mode);
-    if (mode_err != ESP_OK && mode_err != ESP_ERR_WIFI_NOT_INIT)
-    {
-        ESP_LOGE(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(mode_err));
-        return mode_err;
-    }
+    bool keep_ap_active = s_keep_ap_during_sta;
+    wifi_mode_t current_mode = s_current_mode;
+    wifi_mode_t target_mode = keep_ap_active ? WIFI_MODE_APSTA : WIFI_MODE_STA;
 
-    bool ap_active = (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
-    wifi_mode_t target_mode = ap_active ? WIFI_MODE_APSTA : WIFI_MODE_STA;
-
-    if (mode != target_mode)
+    if (current_mode != target_mode)
     {
-        ESP_LOGI(TAG, "Switching WiFi mode from %d to %d", mode, target_mode);
+        ESP_LOGI(TAG, "Switching WiFi mode from %d to %d", current_mode, target_mode);
     }
 
     // Ensure WiFi driver is in the desired mode before configuring the STA interface
     ESP_ERROR_CHECK(esp_wifi_set_mode(target_mode));
 
     esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-    if (config_err == ESP_ERR_WIFI_STATE && ap_active)
+    if (config_err == ESP_ERR_WIFI_STATE && keep_ap_active)
     {
         ESP_LOGW(TAG, "STA config failed while AP active, disconnecting and retrying");
         esp_err_t disconnect_err = esp_wifi_disconnect();
@@ -623,6 +618,7 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     }
 
     s_current_mode = target_mode;
+    s_keep_ap_during_sta = keep_ap_active;
     s_wifi_connected = false;
     s_sta_retry_count = 0;
     s_restore_ap_on_scan = false;
@@ -672,6 +668,7 @@ esp_err_t wifi_manager_enable_apsta(void)
         if (err == ESP_OK)
         {
             s_current_mode = WIFI_MODE_APSTA;
+            s_keep_ap_during_sta = true;
             http_server_publish_wifi_status();
         }
         else
@@ -685,6 +682,8 @@ esp_err_t wifi_manager_enable_apsta(void)
     {
         ESP_LOGD(TAG, "APSTA enable requested while in mode %d", mode);
     }
+
+    s_keep_ap_during_sta = true;
 
     return ESP_OK;
 }
@@ -709,6 +708,7 @@ esp_err_t wifi_manager_disable_ap(void)
         if (err == ESP_OK)
         {
             s_current_mode = WIFI_MODE_STA;
+            s_keep_ap_during_sta = false;
             http_server_publish_wifi_status();
             esp_err_t portal_err = http_server_disable_captive_portal();
             if (portal_err != ESP_OK && portal_err != ESP_ERR_INVALID_STATE)
@@ -755,6 +755,7 @@ esp_err_t wifi_manager_restore_ap_mode(void)
             s_wifi_connected = false;
             s_sta_retry_count = 0;
             s_sta_connecting = false;
+            s_keep_ap_during_sta = false;
             if (s_sta_retry_timer)
             {
                 xTimerStop(s_sta_retry_timer, 0);
