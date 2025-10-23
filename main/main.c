@@ -588,145 +588,68 @@ static void on_control_message(cJSON *msg)
             }
             else
             {
-                esp_err_t err = wifi_manager_save_config(ssid, psk);
-                if (err == ESP_OK)
+                bool apply = !apply_item || cJSON_IsTrue(apply_item);
+
+                if (apply)
                 {
-                    bool apply = !apply_item || cJSON_IsTrue(apply_item);
-                    bool status_changed = false;
+                    wifi_manager_connect_result_t result = {0};
+                    esp_err_t apply_err = wifi_manager_save_and_connect(ssid, psk, pdMS_TO_TICKS(8000), &result);
 
-                    if (apply)
+                    bool fatal_error = !result.saved;
+                    if (!fatal_error && result.error_key)
                     {
-                        wifi_mode_t initial_mode = wifi_manager_get_mode();
-                        bool ap_was_active = (initial_mode == WIFI_MODE_AP || initial_mode == WIFI_MODE_APSTA);
-                        bool apply_success = true;
-                        const char *apply_error = NULL;
+                        fatal_error = strcmp(result.error_key, "apsta_transition_failed") == 0 ||
+                                      strcmp(result.error_key, "sta_start_failed") == 0 ||
+                                      strcmp(result.error_key, "ap_start_failed") == 0 ||
+                                      strcmp(result.error_key, "ap_restore_failed") == 0 ||
+                                      strcmp(result.error_key, "ap_disable_failed") == 0 ||
+                                      strcmp(result.error_key, "write_failed") == 0;
+                    }
 
-                        if (ap_was_active)
+                    bool ok = result.saved && !fatal_error;
+                    cJSON_AddBoolToObject(response, "ok", ok);
+
+                    if (!ok)
+                    {
+                        if (result.error_key)
                         {
-                            esp_err_t apsta_err = wifi_manager_enable_apsta();
-                            if (apsta_err != ESP_OK)
-                            {
-                                apply_success = false;
-                                apply_error = "apsta_transition_failed";
-                            }
-                            else if (initial_mode == WIFI_MODE_AP)
-                            {
-                                status_changed = true;
-                            }
-                        }
-
-                        esp_err_t start_err = ESP_OK;
-                        if (apply_success)
-                        {
-                            start_err = wifi_manager_start_sta(ssid, psk);
-                            if (start_err == ESP_OK)
-                            {
-                                status_changed = true;
-                            }
-                            else
-                            {
-                                apply_success = false;
-                                apply_error = "sta_start_failed";
-                            }
-                        }
-
-                        if (apply_success)
-                        {
-                            for (int i = 0; i < 80 && !wifi_manager_is_connected(); i++)
-                            {
-                                vTaskDelay(pdMS_TO_TICKS(100));
-                            }
-
-                            if (wifi_manager_is_connected())
-                            {
-                                if (ap_was_active && wifi_manager_disable_ap() == ESP_OK)
-                                {
-                                    status_changed = true;
-                                }
-
-                                char ip[16] = {0};
-                                if (wifi_manager_get_ip(ip, sizeof(ip)) == ESP_OK)
-                                {
-                                    cJSON_AddStringToObject(response, "ip", ip);
-                                }
-
-                                wifi_mode_t mode_after = wifi_manager_get_mode();
-                                bool connecting_now = wifi_manager_is_connecting();
-                                cJSON_AddStringToObject(response, "mode",
-                                                        wifi_mode_status_string(mode_after, true, connecting_now));
-                            }
-                            else
-                            {
-                                status_changed = true;
-
-                                wifi_mode_t mode_before = wifi_manager_get_mode();
-                                if (ap_was_active)
-                                {
-                                    if (mode_before != WIFI_MODE_AP)
-                                    {
-                                        esp_err_t restore_err = wifi_manager_restore_ap_mode();
-                                        if (restore_err != ESP_OK)
-                                        {
-                                            ESP_LOGW(TAG, "Failed to restore AP mode after STA disconnect: %s",
-                                                     esp_err_to_name(restore_err));
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    esp_err_t fallback_err = wifi_manager_start_ap(NULL,
-                                                                                   WIFI_MANAGER_DEFAULT_AP_PASS);
-                                    if (fallback_err != ESP_OK)
-                                    {
-                                        ESP_LOGE(TAG, "Failed to start AP fallback: %s",
-                                                 esp_err_to_name(fallback_err));
-                                    }
-                                }
-
-                                wifi_mode_t mode_after = wifi_manager_get_mode();
-                                bool connected_now = wifi_manager_is_connected();
-                                bool connecting_now = wifi_manager_is_connecting();
-                                cJSON_AddStringToObject(response, "mode",
-                                                        wifi_mode_status_string(mode_after, connected_now, connecting_now));
-
-                                char ip[16] = {0};
-                                if (wifi_manager_get_ip(ip, sizeof(ip)) != ESP_OK || strlen(ip) == 0)
-                                {
-                                    strncpy(ip, "192.168.4.1", sizeof(ip));
-                                    ip[sizeof(ip) - 1] = '\0';
-                                }
-                                cJSON_AddStringToObject(response, "ip", ip);
-                            }
-
-                            cJSON_AddBoolToObject(response, "ok", true);
+                            cJSON_AddStringToObject(response, "err", result.error_key);
                         }
                         else
                         {
-                            if (ap_was_active && wifi_manager_restore_ap_mode() == ESP_OK && initial_mode != WIFI_MODE_AP)
-                            {
-                                status_changed = true;
-                            }
-                            cJSON_AddBoolToObject(response, "ok", false);
-                            if (apply_error)
-                            {
-                                cJSON_AddStringToObject(response, "err", apply_error);
-                            }
+                            cJSON_AddStringToObject(response, "err", esp_err_to_name(apply_err));
                         }
                     }
-                    else
-                    {
-                        cJSON_AddBoolToObject(response, "ok", true);
-                    }
 
-                    if (status_changed)
+                    wifi_mode_t mode_after = wifi_manager_get_mode();
+                    bool connected_now = wifi_manager_is_connected();
+                    bool connecting_now = wifi_manager_is_connecting();
+                    cJSON_AddStringToObject(response,
+                                            "mode",
+                                            wifi_mode_status_string(mode_after, connected_now, connecting_now));
+
+                    char ip[16] = {0};
+                    if (wifi_manager_get_ip(ip, sizeof(ip)) != ESP_OK || strlen(ip) == 0)
+                    {
+                        strncpy(ip, "192.168.4.1", sizeof(ip));
+                        ip[sizeof(ip) - 1] = '\0';
+                    }
+                    cJSON_AddStringToObject(response, "ip", ip);
+
+                    if (result.status_changed)
                     {
                         notify_wifi_status();
                     }
                 }
                 else
                 {
-                    cJSON_AddBoolToObject(response, "ok", false);
-                    cJSON_AddStringToObject(response, "err", "write_failed");
+                    esp_err_t save_err = wifi_manager_save_config(ssid, psk);
+                    bool ok = (save_err == ESP_OK);
+                    cJSON_AddBoolToObject(response, "ok", ok);
+                    if (!ok)
+                    {
+                        cJSON_AddStringToObject(response, "err", "write_failed");
+                    }
                 }
             }
         }
@@ -879,31 +802,40 @@ void app_main(void)
     if (has_saved_config)
     {
         ESP_LOGI(TAG, "Connecting to saved WiFi: %s", ssid);
+        wifi_manager_connect_result_t connect_result = {0};
+        esp_err_t connect_err = wifi_manager_connect_with_fallback(ssid, pass, pdMS_TO_TICKS(8000), &connect_result);
 
-        esp_err_t sta_err = wifi_manager_start_sta(ssid, pass);
-        if (sta_err == ESP_OK)
+        if (connect_result.connected && connect_err == ESP_OK)
         {
-            notify_wifi_status();
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to start STA with saved config: %s", esp_err_to_name(sta_err));
-
-            esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-            if (ap_err == ESP_OK)
+            char ip[16] = {0};
+            if (wifi_manager_get_ip(ip, sizeof(ip)) == ESP_OK && strlen(ip) > 0)
             {
-                ESP_LOGI(TAG, "AP mode active after STA start failure: %s", wifi_manager_get_ap_ssid());
-                notify_wifi_status();
+                ESP_LOGI(TAG, "Connected to WiFi %s with IP %s", ssid, ip);
             }
             else
             {
-                ESP_LOGE(TAG, "Failed to start AP mode after STA failure: %s", esp_err_to_name(ap_err));
+                ESP_LOGI(TAG, "Connected to WiFi %s", ssid);
             }
+        }
+        else
+        {
+            const char *reason = connect_result.error_key ? connect_result.error_key : esp_err_to_name(connect_err);
+            ESP_LOGW(TAG, "Failed to connect to saved WiFi (%s)", reason);
+
+            if (connect_result.fallback_ap)
+            {
+                ESP_LOGI(TAG, "AP mode active after STA failure: %s", wifi_manager_get_ap_ssid());
+            }
+        }
+
+        if (connect_result.status_changed)
+        {
+            notify_wifi_status();
         }
     }
     else
     {
-        esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+        esp_err_t ap_err = wifi_manager_ensure_ap_only(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
         if (ap_err == ESP_OK)
         {
             ESP_LOGI(TAG, "AP mode active: %s", wifi_manager_get_ap_ssid());

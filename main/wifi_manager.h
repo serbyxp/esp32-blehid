@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_wifi_types.h"
+#include "freertos/FreeRTOS.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -21,6 +22,18 @@ typedef struct
 
 typedef void (*wifi_scan_callback_t)(const wifi_ap_record_t *records, uint16_t count);
 
+typedef struct
+{
+    bool saved;
+    bool connected;
+    bool fallback_ap;
+    bool status_changed;
+    bool timed_out;
+    wifi_mode_t final_mode;
+    esp_err_t err;
+    const char *error_key;
+} wifi_manager_connect_result_t;
+
 #define WIFI_MANAGER_DEFAULT_AP_PASS "composite"
 
 esp_err_t wifi_manager_init(void);
@@ -32,6 +45,11 @@ esp_err_t wifi_manager_restore_ap_mode(void);
 esp_err_t wifi_manager_start_scan(wifi_scan_callback_t callback);
 esp_err_t wifi_manager_stop_scan(void);
 esp_err_t wifi_manager_stop(void);
+esp_err_t wifi_manager_ensure_ap_only(const char *ssid, const char *password);
+esp_err_t wifi_manager_connect_with_fallback(const char *ssid, const char *password,
+                                             TickType_t timeout_ticks, wifi_manager_connect_result_t *result);
+esp_err_t wifi_manager_save_and_connect(const char *ssid, const char *password,
+                                        TickType_t timeout_ticks, wifi_manager_connect_result_t *result);
 
 bool wifi_manager_is_connected(void);
 bool wifi_manager_is_connecting(void);

@@ -11,6 +11,7 @@
 #include "lwip/inet.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 #ifdef __has_include
@@ -107,6 +108,67 @@ static void stop_sta_retry_timer(void)
             ESP_LOGW(TAG, "Failed to stop STA retry timer");
         }
     }
+}
+
+static bool wifi_manager_wait_for_sta_connection(TickType_t timeout_ticks, bool *timed_out)
+{
+    if (timed_out)
+    {
+        *timed_out = false;
+    }
+
+    if (s_wifi_connected)
+    {
+        return true;
+    }
+
+    TickType_t start = xTaskGetTickCount();
+    const TickType_t poll_interval = pdMS_TO_TICKS(100);
+
+    while (true)
+    {
+        if (s_wifi_connected)
+        {
+            return true;
+        }
+
+        if (!s_sta_connecting && s_sta_retry_count == 0)
+        {
+            break;
+        }
+
+        if (timeout_ticks == 0)
+        {
+            break;
+        }
+
+        TickType_t elapsed = xTaskGetTickCount() - start;
+        if (elapsed >= timeout_ticks)
+        {
+            if (timed_out)
+            {
+                *timed_out = true;
+            }
+            break;
+        }
+
+        TickType_t remaining = timeout_ticks - elapsed;
+        TickType_t delay_ticks = remaining < poll_interval ? remaining : poll_interval;
+        if (delay_ticks == 0)
+        {
+            delay_ticks = 1;
+        }
+
+        vTaskDelay(delay_ticks);
+    }
+
+    if (!s_wifi_connected && timed_out && timeout_ticks > 0 && !*timed_out &&
+        (xTaskGetTickCount() - start) >= timeout_ticks)
+    {
+        *timed_out = true;
+    }
+
+    return s_wifi_connected;
 }
 
 static void stop_wifi_if_running(void)
@@ -1006,6 +1068,201 @@ esp_err_t wifi_manager_stop(void)
     }
 
     return err;
+}
+
+esp_err_t wifi_manager_ensure_ap_only(const char *ssid, const char *password)
+{
+    wifi_mode_t mode = wifi_manager_get_mode();
+    if (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA)
+    {
+        esp_err_t restore_err = wifi_manager_restore_ap_mode();
+        if (restore_err != ESP_OK)
+        {
+            return restore_err;
+        }
+    }
+
+    return wifi_manager_start_ap(ssid, password);
+}
+
+esp_err_t wifi_manager_connect_with_fallback(const char *ssid, const char *password,
+                                             TickType_t timeout_ticks, wifi_manager_connect_result_t *result)
+{
+    wifi_manager_connect_result_t local_result = {0};
+    local_result.err = ESP_OK;
+    local_result.final_mode = wifi_manager_get_mode();
+
+    wifi_mode_t initial_mode = wifi_manager_get_mode();
+    bool ap_was_active = (initial_mode == WIFI_MODE_AP || initial_mode == WIFI_MODE_APSTA);
+    bool apsta_enabled = false;
+
+    if (ap_was_active && initial_mode == WIFI_MODE_AP)
+    {
+        esp_err_t apsta_err = wifi_manager_enable_apsta();
+        if (apsta_err != ESP_OK)
+        {
+            local_result.err = apsta_err;
+            local_result.error_key = "apsta_transition_failed";
+            local_result.fallback_ap = true;
+            local_result.final_mode = wifi_manager_get_mode();
+            if (result)
+            {
+                *result = local_result;
+            }
+            return apsta_err;
+        }
+
+        apsta_enabled = true;
+        local_result.status_changed = true;
+    }
+
+    esp_err_t start_err = wifi_manager_start_sta(ssid, password);
+    if (start_err != ESP_OK)
+    {
+        local_result.err = start_err;
+        local_result.error_key = "sta_start_failed";
+
+        if (apsta_enabled)
+        {
+            esp_err_t restore_err = wifi_manager_restore_ap_mode();
+            if (restore_err == ESP_OK)
+            {
+                local_result.status_changed = true;
+                local_result.fallback_ap = true;
+            }
+            else
+            {
+                local_result.err = restore_err;
+                local_result.error_key = "ap_restore_failed";
+            }
+        }
+        else if (!ap_was_active)
+        {
+            esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+            if (ap_err == ESP_OK)
+            {
+                local_result.status_changed = true;
+                local_result.fallback_ap = true;
+            }
+            else
+            {
+                local_result.err = ap_err;
+                local_result.error_key = "ap_start_failed";
+            }
+        }
+
+        local_result.final_mode = wifi_manager_get_mode();
+        if (result)
+        {
+            *result = local_result;
+        }
+        return local_result.err;
+    }
+
+    local_result.status_changed = true;
+
+    bool timed_out = false;
+    local_result.connected = wifi_manager_wait_for_sta_connection(timeout_ticks, &timed_out);
+    local_result.timed_out = timed_out;
+
+    if (local_result.connected)
+    {
+        if (ap_was_active)
+        {
+            esp_err_t disable_err = wifi_manager_disable_ap();
+            if (disable_err != ESP_OK)
+            {
+                local_result.err = disable_err;
+                local_result.error_key = "ap_disable_failed";
+            }
+            else
+            {
+                local_result.status_changed = true;
+            }
+        }
+
+        local_result.final_mode = wifi_manager_get_mode();
+        if (result)
+        {
+            *result = local_result;
+        }
+        return local_result.err;
+    }
+
+    if (ap_was_active)
+    {
+        esp_err_t restore_err = wifi_manager_restore_ap_mode();
+        if (restore_err == ESP_OK)
+        {
+            local_result.status_changed = true;
+            local_result.fallback_ap = true;
+        }
+        else
+        {
+            local_result.err = restore_err;
+            local_result.error_key = "ap_restore_failed";
+        }
+    }
+    else
+    {
+        esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+        if (ap_err == ESP_OK)
+        {
+            local_result.status_changed = true;
+            local_result.fallback_ap = true;
+        }
+        else
+        {
+            local_result.err = ap_err;
+            local_result.error_key = "ap_start_failed";
+        }
+    }
+
+    if (!local_result.error_key)
+    {
+        local_result.error_key = timed_out ? "sta_connect_timeout" : "sta_connect_failed";
+        local_result.err = timed_out ? ESP_ERR_TIMEOUT : ESP_FAIL;
+    }
+
+    local_result.final_mode = wifi_manager_get_mode();
+    if (result)
+    {
+        *result = local_result;
+    }
+    return local_result.err;
+}
+
+esp_err_t wifi_manager_save_and_connect(const char *ssid, const char *password,
+                                        TickType_t timeout_ticks, wifi_manager_connect_result_t *result)
+{
+    wifi_manager_connect_result_t local_result = {0};
+    local_result.err = ESP_OK;
+    local_result.final_mode = wifi_manager_get_mode();
+
+    esp_err_t save_err = wifi_manager_save_config(ssid, password);
+    if (save_err != ESP_OK)
+    {
+        local_result.err = save_err;
+        local_result.error_key = "write_failed";
+        if (result)
+        {
+            *result = local_result;
+        }
+        return save_err;
+    }
+
+    local_result.saved = true;
+
+    wifi_manager_connect_result_t connect_result = {0};
+    esp_err_t connect_err = wifi_manager_connect_with_fallback(ssid, password, timeout_ticks, &connect_result);
+    connect_result.saved = true;
+
+    if (result)
+    {
+        *result = connect_result;
+    }
+
+    return connect_err;
 }
 
 bool wifi_manager_is_connected(void)
