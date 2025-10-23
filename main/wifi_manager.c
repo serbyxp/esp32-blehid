@@ -160,7 +160,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         {
         case WIFI_REASON_AUTH_FAIL:
         case WIFI_REASON_AUTH_EXPIRE:
-        case WIFI_REASON_NO_AP_FOUND:
 #ifdef WIFI_REASON_HANDSHAKE_TIMEOUT
         case WIFI_REASON_HANDSHAKE_TIMEOUT:
 #endif
@@ -172,32 +171,33 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 #endif
             auth_or_config_failure = true;
             break;
+        case WIFI_REASON_NO_AP_FOUND:
+            // Treat missing AP the same as auth failures for retry logic.
+            auth_or_config_failure = true;
+            break;
         default:
             break;
         }
 
-        if (auth_or_config_failure)
+        if (auth_or_config_failure && s_sta_retry_count < MAX_STA_RETRY)
         {
-            ESP_LOGW(TAG, "Connection failed (reason %d), restoring AP-only mode", event->reason);
-            stop_sta_retry_timer();
-            s_sta_retry_count = 0;
-            esp_err_t restore_err = wifi_manager_restore_ap_mode();
-            if (restore_err != ESP_OK)
+            s_sta_retry_count++;
+            ESP_LOGW(TAG, "Authentication/config failure (reason %d), retry %d/%d in %dms",
+                     event->reason, s_sta_retry_count, MAX_STA_RETRY, STA_RETRY_DELAY_MS);
+            if (s_sta_retry_timer)
             {
-                ESP_LOGE(TAG, "Failed to restore AP-only mode after disconnection: %s",
-                         esp_err_to_name(restore_err));
-            }
-            else
-            {
-                esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
-                if (ap_err != ESP_OK)
+                if (xTimerIsTimerActive(s_sta_retry_timer) == pdTRUE)
                 {
-                    ESP_LOGE(TAG, "Failed to start fallback AP after auth failure: %s",
-                             esp_err_to_name(ap_err));
+                    xTimerStop(s_sta_retry_timer, 0);
+                }
+                if (xTimerChangePeriod(s_sta_retry_timer, pdMS_TO_TICKS(STA_RETRY_DELAY_MS), 0) != pdPASS ||
+                    xTimerStart(s_sta_retry_timer, 0) != pdPASS)
+                {
+                    ESP_LOGE(TAG, "Failed to schedule STA retry timer");
                 }
             }
         }
-        else if (s_sta_retry_count < MAX_STA_RETRY)
+        else if (!auth_or_config_failure && s_sta_retry_count < MAX_STA_RETRY)
         {
             s_sta_retry_count++;
             ESP_LOGI(TAG, "Retry %d/%d in %dms (reason %d)",
@@ -217,7 +217,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
         else
         {
-            ESP_LOGW(TAG, "Max retries reached, fallback to AP mode");
+            if (auth_or_config_failure)
+            {
+                ESP_LOGW(TAG, "Authentication retries exhausted after %d attempts (reason %d); enabling fallback AP",
+                         MAX_STA_RETRY, event->reason);
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Max retries reached (reason %d), enabling fallback AP", event->reason);
+            }
             stop_sta_retry_timer();
             s_sta_retry_count = 0;
             if (wifi_manager_restore_ap_mode() != ESP_OK)
