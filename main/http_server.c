@@ -27,9 +27,19 @@ static void populate_wifi_status_json(cJSON *obj)
     wifi_mode_t mode = wifi_manager_get_mode();
     const char *mode_str = "none";
 
+    bool connected = wifi_manager_is_connected();
+    bool connecting = wifi_manager_is_connecting();
+
     if (mode == WIFI_MODE_STA)
     {
-        mode_str = wifi_manager_is_connected() ? "sta" : "connecting";
+        if (connected)
+        {
+            mode_str = "sta";
+        }
+        else if (connecting)
+        {
+            mode_str = "connecting";
+        }
     }
     else if (mode == WIFI_MODE_AP)
     {
@@ -37,11 +47,23 @@ static void populate_wifi_status_json(cJSON *obj)
     }
     else if (mode == WIFI_MODE_APSTA)
     {
-        mode_str = wifi_manager_is_connected() ? "apsta" : "apsta_connecting";
+        if (connected)
+        {
+            mode_str = "apsta";
+        }
+        else if (connecting)
+        {
+            mode_str = "apsta_connecting";
+        }
+        else
+        {
+            mode_str = "ap";
+        }
     }
 
     cJSON_AddStringToObject(obj, "mode", mode_str);
-    cJSON_AddBoolToObject(obj, "connected", wifi_manager_is_connected());
+    cJSON_AddBoolToObject(obj, "connected", connected);
+    cJSON_AddBoolToObject(obj, "connecting", connecting);
     cJSON_AddBoolToObject(obj, "scanning", wifi_manager_is_scanning());
     cJSON_AddNumberToObject(obj, "retry_count", wifi_manager_get_retry_count());
     cJSON_AddStringToObject(obj, "hostname", wifi_manager_get_hostname());
@@ -60,6 +82,7 @@ static void populate_wifi_status_json(cJSON *obj)
         if (sta)
         {
             cJSON_AddBoolToObject(sta, "connected", sta_info.connected);
+            cJSON_AddBoolToObject(sta, "connecting", sta_info.connecting);
             cJSON_AddStringToObject(sta, "ssid", sta_info.ssid);
             cJSON_AddStringToObject(sta, "ip", sta_info.ip);
             cJSON_AddNumberToObject(sta, "rssi", sta_info.rssi);

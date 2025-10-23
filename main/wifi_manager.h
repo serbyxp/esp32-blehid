@@ -10,6 +10,7 @@
 typedef struct
 {
     bool connected;
+    bool connecting;
     char ssid[33];
     char ip[16];
     int8_t rssi;
@@ -32,6 +33,7 @@ esp_err_t wifi_manager_stop_scan(void);
 esp_err_t wifi_manager_stop(void);
 
 bool wifi_manager_is_connected(void);
+bool wifi_manager_is_connecting(void);
 bool wifi_manager_is_scanning(void);
 wifi_mode_t wifi_manager_get_mode(void);
 int wifi_manager_get_retry_count(void);

@@ -154,16 +154,32 @@ static void log_consumer_usage_mapping(uint16_t usage, uint16_t mask, bool activ
     }
 }
 
-static const char *wifi_mode_status_string(wifi_mode_t mode, bool connected)
+static const char *wifi_mode_status_string(wifi_mode_t mode, bool connected, bool connecting)
 {
     switch (mode)
     {
     case WIFI_MODE_STA:
-        return connected ? "sta" : "connecting";
+        if (connected)
+        {
+            return "sta";
+        }
+        if (connecting)
+        {
+            return "connecting";
+        }
+        return "sta";
     case WIFI_MODE_AP:
         return "ap";
     case WIFI_MODE_APSTA:
-        return connected ? "apsta" : "apsta_connecting";
+        if (connected)
+        {
+            return "apsta";
+        }
+        if (connecting)
+        {
+            return "apsta_connecting";
+        }
+        return "ap";
     default:
         return "none";
     }
@@ -178,10 +194,12 @@ static void populate_wifi_status_json(cJSON *obj)
 
     wifi_mode_t mode = wifi_manager_get_mode();
     bool connected = wifi_manager_is_connected();
-    const char *mode_str = wifi_mode_status_string(mode, connected);
+    bool connecting = wifi_manager_is_connecting();
+    const char *mode_str = wifi_mode_status_string(mode, connected, connecting);
 
     cJSON_AddStringToObject(obj, "mode", mode_str);
     cJSON_AddBoolToObject(obj, "connected", connected);
+    cJSON_AddBoolToObject(obj, "connecting", connecting);
     cJSON_AddBoolToObject(obj, "scanning", wifi_manager_is_scanning());
     cJSON_AddNumberToObject(obj, "retry_count", wifi_manager_get_retry_count());
     cJSON_AddStringToObject(obj, "hostname", wifi_manager_get_hostname());
@@ -200,6 +218,7 @@ static void populate_wifi_status_json(cJSON *obj)
         if (sta)
         {
             cJSON_AddBoolToObject(sta, "connected", sta_info.connected);
+            cJSON_AddBoolToObject(sta, "connecting", sta_info.connecting);
             cJSON_AddStringToObject(sta, "ssid", sta_info.ssid);
             cJSON_AddStringToObject(sta, "ip", sta_info.ip);
             cJSON_AddNumberToObject(sta, "rssi", sta_info.rssi);
