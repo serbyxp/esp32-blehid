@@ -1,0 +1,3 @@
+# main/idf_component.yml
+dependencies:
+  espressif/mdns: "^1.8.2"   # pick a version compatible with your IDF (5.5.1)
