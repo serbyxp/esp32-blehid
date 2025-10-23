@@ -651,8 +651,9 @@ static void on_control_message(cJSON *msg)
                                 }
 
                                 wifi_mode_t mode_after = wifi_manager_get_mode();
+                                bool connecting_now = wifi_manager_is_connecting();
                                 cJSON_AddStringToObject(response, "mode",
-                                                        wifi_mode_status_string(mode_after, true));
+                                                        wifi_mode_status_string(mode_after, true, connecting_now));
                             }
                             else
                             {
@@ -684,8 +685,9 @@ static void on_control_message(cJSON *msg)
 
                                 wifi_mode_t mode_after = wifi_manager_get_mode();
                                 bool connected_now = wifi_manager_is_connected();
+                                bool connecting_now = wifi_manager_is_connecting();
                                 cJSON_AddStringToObject(response, "mode",
-                                                        wifi_mode_status_string(mode_after, connected_now));
+                                                        wifi_mode_status_string(mode_after, connected_now, connecting_now));
 
                                 char ip[16] = {0};
                                 if (wifi_manager_get_ip(ip, sizeof(ip)) != ESP_OK || strlen(ip) == 0)
