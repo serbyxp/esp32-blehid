@@ -228,9 +228,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             }
             stop_sta_retry_timer();
             s_sta_retry_count = 0;
-            if (wifi_manager_restore_ap_mode() != ESP_OK)
+            esp_err_t restore_err = wifi_manager_restore_ap_mode();
+            if (restore_err != ESP_OK)
             {
                 ESP_LOGE(TAG, "Failed to restore AP-only mode after max retries");
+            }
+            else
+            {
+                esp_err_t ap_err = wifi_manager_start_ap(NULL, WIFI_MANAGER_DEFAULT_AP_PASS);
+                if (ap_err != ESP_OK)
+                {
+                    ESP_LOGE(TAG, "Failed to start fallback AP after max retries: %s", esp_err_to_name(ap_err));
+                }
             }
         }
         http_server_publish_wifi_status();
