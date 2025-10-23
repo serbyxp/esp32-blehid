@@ -11,6 +11,7 @@
 #include "lwip/inet.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
+#include "sdkconfig.h"
 
 #ifdef __has_include
 #if __has_include("mdns.h")
@@ -47,8 +48,17 @@ static esp_netif_t *s_sta_netif = NULL;
 static TimerHandle_t s_sta_retry_timer = NULL;
 
 #if WIFI_MANAGER_HAS_MDNS
+#ifdef CONFIG_MDNS_PREDEF_NETIF_AP
+static bool s_mdns_ap_registered = true;
+#else
 static bool s_mdns_ap_registered = false;
+#endif
+
+#ifdef CONFIG_MDNS_PREDEF_NETIF_STA
+static bool s_mdns_sta_registered = true;
+#else
 static bool s_mdns_sta_registered = false;
+#endif
 
 static void wifi_manager_register_mdns_netif(esp_netif_t *netif, bool *registered_flag)
 {
