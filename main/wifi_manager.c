@@ -40,6 +40,7 @@ static wifi_mode_t s_current_mode = WIFI_MODE_NULL;
 static char s_hostname[32] = {0};
 static char s_ap_ssid[32] = {0};
 static int s_sta_retry_count = 0;
+static bool s_sta_connecting = false;
 static bool s_scanning = false;
 static wifi_scan_callback_t s_scan_callback = NULL;
 static bool s_restore_ap_on_scan = false;
@@ -141,6 +142,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         {
             esp_wifi_connect();
             ESP_LOGI(TAG, "WiFi STA started, connecting...");
+            s_sta_connecting = true;
         }
         else
         {
@@ -228,6 +230,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             }
             stop_sta_retry_timer();
             s_sta_retry_count = 0;
+            s_sta_connecting = false;
             esp_err_t restore_err = wifi_manager_restore_ap_mode();
             if (restore_err != ESP_OK)
             {
@@ -251,6 +254,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_wifi_connected = true;
         s_sta_retry_count = 0;
+        s_sta_connecting = false;
         if (s_sta_retry_timer)
         {
             xTimerStop(s_sta_retry_timer, 0);
@@ -342,6 +346,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         if (err != ESP_OK)
         {
             ESP_LOGW(TAG, "esp_wifi_connect failed during retry: %s", esp_err_to_name(err));
+        }
+        else
+        {
+            s_sta_connecting = true;
         }
     }
 }
@@ -505,6 +513,7 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
         s_wifi_connected = false;
         s_sta_retry_count = 0;
         s_restore_ap_on_scan = false;
+        s_sta_connecting = false;
 
         if (s_sta_retry_timer)
         {
@@ -617,6 +626,7 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     s_wifi_connected = false;
     s_sta_retry_count = 0;
     s_restore_ap_on_scan = false;
+    s_sta_connecting = true;
 
     ESP_LOGI(TAG, "STA started, connecting to: %s", ssid);
     http_server_publish_wifi_status();
@@ -744,6 +754,7 @@ esp_err_t wifi_manager_restore_ap_mode(void)
             s_current_mode = WIFI_MODE_AP;
             s_wifi_connected = false;
             s_sta_retry_count = 0;
+            s_sta_connecting = false;
             if (s_sta_retry_timer)
             {
                 xTimerStop(s_sta_retry_timer, 0);
@@ -773,9 +784,15 @@ esp_err_t wifi_manager_start_scan(wifi_scan_callback_t callback)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (s_current_mode == WIFI_MODE_STA && !s_wifi_connected)
+    if (s_sta_connecting)
     {
         ESP_LOGW(TAG, "Cannot start scan while STA is connecting");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_current_mode == WIFI_MODE_STA && !s_wifi_connected)
+    {
+        ESP_LOGW(TAG, "Cannot start scan while STA interface is active without a connection");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -886,6 +903,7 @@ esp_err_t wifi_manager_stop(void)
         s_current_mode = WIFI_MODE_NULL;
         s_wifi_connected = false;
         s_sta_retry_count = 0;
+        s_sta_connecting = false;
         if (s_sta_retry_timer)
         {
             xTimerStop(s_sta_retry_timer, 0);
@@ -904,6 +922,11 @@ esp_err_t wifi_manager_stop(void)
 bool wifi_manager_is_connected(void)
 {
     return s_wifi_connected;
+}
+
+bool wifi_manager_is_connecting(void)
+{
+    return s_sta_connecting;
 }
 
 bool wifi_manager_is_scanning(void)
@@ -975,6 +998,7 @@ esp_err_t wifi_manager_get_sta_info(wifi_manager_sta_info_t *info)
 
     memset(info, 0, sizeof(wifi_manager_sta_info_t));
     info->connected = s_wifi_connected;
+    info->connecting = s_sta_connecting;
     info->retry_count = s_sta_retry_count;
 
     if (s_current_mode == WIFI_MODE_STA || s_current_mode == WIFI_MODE_APSTA)
