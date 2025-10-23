@@ -3,6 +3,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/timers.h"
+#include "freertos/task.h"
 #include "http_server.h"
 #include "nvs.h"
 #include <stdbool.h>
@@ -24,6 +25,41 @@ static esp_netif_ip_info_t s_stub_ip_info = {0};
 
 static esp_netif_t s_stub_sta_netif;
 static esp_netif_t s_stub_ap_netif;
+
+static TickType_t s_fake_tick = 0;
+
+typedef void (*wifi_manager_delay_hook_t)(TickType_t current_tick);
+static wifi_manager_delay_hook_t s_delay_hook = NULL;
+
+TickType_t wifi_manager_test_get_tick_count(void)
+{
+    return s_fake_tick;
+}
+
+void wifi_manager_test_set_delay_hook(wifi_manager_delay_hook_t hook)
+{
+    s_delay_hook = hook;
+}
+
+TickType_t xTaskGetTickCount(void)
+{
+    return s_fake_tick;
+}
+
+void vTaskDelay(TickType_t xTicksToDelay)
+{
+    if (xTicksToDelay == 0)
+    {
+        xTicksToDelay = 1;
+    }
+
+    s_fake_tick += xTicksToDelay;
+
+    if (s_delay_hook)
+    {
+        s_delay_hook(s_fake_tick);
+    }
+}
 
 esp_err_t esp_wifi_set_mode(wifi_mode_t mode)
 {
@@ -363,6 +399,8 @@ void wifi_manager_test_reset_stubs(void)
     memset(&s_stub_sta_config, 0, sizeof(s_stub_sta_config));
     memset(&s_stub_ap_info, 0, sizeof(s_stub_ap_info));
     memset(&s_stub_ip_info, 0, sizeof(s_stub_ip_info));
+    s_fake_tick = 0;
+    s_delay_hook = NULL;
 }
 
 int wifi_manager_test_get_scan_stop_calls(void)
