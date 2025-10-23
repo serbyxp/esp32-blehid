@@ -24,6 +24,7 @@
 #define WIFI_MANAGER_HAS_MDNS 0
 #endif
 #include <string.h>
+#include <stdlib.h>
 
 static const char *TAG = "WIFI_MGR";
 static const char *NVS_WIFI_NAMESPACE = "wifi_config";
@@ -44,6 +45,7 @@ static bool s_sta_connecting = false;
 static bool s_scanning = false;
 static wifi_scan_callback_t s_scan_callback = NULL;
 static bool s_restore_ap_on_scan = false;
+static bool s_defer_ap_restore_until_connect = false;
 static bool s_keep_ap_during_sta = false;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
@@ -114,6 +116,60 @@ static void stop_wifi_if_running(void)
     {
         ESP_LOGW(TAG, "esp_wifi_stop returned %s", esp_err_to_name(err));
     }
+}
+
+static esp_err_t wifi_manager_stop_scan_internal(bool restore_ap_mode)
+{
+    if (!s_scanning)
+    {
+        return ESP_OK;
+    }
+
+    esp_err_t err = esp_wifi_scan_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_STATE)
+    {
+        ESP_LOGW(TAG, "esp_wifi_scan_stop failed: %s", esp_err_to_name(err));
+    }
+
+    s_scanning = false;
+    s_scan_callback = NULL;
+
+    if (s_restore_ap_on_scan)
+    {
+        if (restore_ap_mode)
+        {
+            esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_AP);
+            if (mode_err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to restore AP mode after scan stop: %s", esp_err_to_name(mode_err));
+                if (err == ESP_OK || err == ESP_ERR_WIFI_STATE)
+                {
+                    err = mode_err;
+                }
+            }
+            s_defer_ap_restore_until_connect = false;
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Deferred AP-only restore after aborting scan");
+            s_defer_ap_restore_until_connect = true;
+        }
+
+        s_restore_ap_on_scan = false;
+    }
+    else if (restore_ap_mode)
+    {
+        s_defer_ap_restore_until_connect = false;
+    }
+
+    http_server_publish_wifi_status();
+
+    if (err == ESP_ERR_WIFI_STATE)
+    {
+        err = ESP_OK;
+    }
+
+    return err;
 }
 
 static void sta_retry_timer_callback(TimerHandle_t xTimer)
@@ -256,6 +312,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         s_wifi_connected = true;
         s_sta_retry_count = 0;
         s_sta_connecting = false;
+        s_defer_ap_restore_until_connect = false;
         if (s_sta_retry_timer)
         {
             xTimerStop(s_sta_retry_timer, 0);
@@ -327,6 +384,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         {
             esp_wifi_set_mode(WIFI_MODE_AP);
             s_restore_ap_on_scan = false;
+            s_defer_ap_restore_until_connect = false;
         }
     }
     else if (event_base == WIFI_MANAGER_EVENT && event_id == WIFI_MANAGER_EVENT_RETRY_CONNECT)
@@ -545,6 +603,20 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password)
 
 esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
 {
+    if (s_scanning)
+    {
+        ESP_LOGI(TAG, "Stopping active scan before starting STA connection");
+        esp_err_t stop_err = wifi_manager_stop_scan_internal(false);
+        if (stop_err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "Failed to stop scan cleanly before STA start: %s", esp_err_to_name(stop_err));
+        }
+    }
+    else
+    {
+        s_defer_ap_restore_until_connect = false;
+    }
+
     if (!s_sta_netif)
     {
         s_sta_netif = esp_netif_create_default_wifi_sta();
@@ -553,6 +625,11 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     if (!s_sta_netif)
     {
         ESP_LOGE(TAG, "Failed to create STA netif");
+        if (s_defer_ap_restore_until_connect)
+        {
+            wifi_manager_restore_ap_mode();
+            s_defer_ap_restore_until_connect = false;
+        }
         return ESP_FAIL;
     }
 
@@ -588,7 +665,17 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     }
 
     // Ensure WiFi driver is in the desired mode before configuring the STA interface
-    ESP_ERROR_CHECK(esp_wifi_set_mode(target_mode));
+    esp_err_t mode_err = esp_wifi_set_mode(target_mode);
+    if (mode_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_set_mode(%d) failed: %s", target_mode, esp_err_to_name(mode_err));
+        if (s_defer_ap_restore_until_connect)
+        {
+            wifi_manager_restore_ap_mode();
+            s_defer_ap_restore_until_connect = false;
+        }
+        return mode_err;
+    }
 
     esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (config_err == ESP_ERR_WIFI_STATE && keep_ap_active)
@@ -607,6 +694,11 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     if (config_err != ESP_OK)
     {
         ESP_LOGE(TAG, "esp_wifi_set_config (STA) failed: %s", esp_err_to_name(config_err));
+        if (s_defer_ap_restore_until_connect)
+        {
+            wifi_manager_restore_ap_mode();
+            s_defer_ap_restore_until_connect = false;
+        }
         return config_err;
     }
 
@@ -614,6 +706,11 @@ esp_err_t wifi_manager_start_sta(const char *ssid, const char *password)
     if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_CONN)
     {
         ESP_LOGE(TAG, "esp_wifi_start (STA) failed: %s", esp_err_to_name(start_err));
+        if (s_defer_ap_restore_until_connect)
+        {
+            wifi_manager_restore_ap_mode();
+            s_defer_ap_restore_until_connect = false;
+        }
         return start_err;
     }
 
@@ -741,6 +838,7 @@ esp_err_t wifi_manager_restore_ap_mode(void)
 
     if (mode == WIFI_MODE_AP)
     {
+        s_defer_ap_restore_until_connect = false;
         return ESP_OK;
     }
 
@@ -755,6 +853,7 @@ esp_err_t wifi_manager_restore_ap_mode(void)
             s_wifi_connected = false;
             s_sta_retry_count = 0;
             s_sta_connecting = false;
+            s_defer_ap_restore_until_connect = false;
             s_keep_ap_during_sta = false;
             if (s_sta_retry_timer)
             {
@@ -774,6 +873,7 @@ esp_err_t wifi_manager_restore_ap_mode(void)
         return err;
     }
 
+    s_defer_ap_restore_until_connect = false;
     return ESP_OK;
 }
 
@@ -799,6 +899,7 @@ esp_err_t wifi_manager_start_scan(wifi_scan_callback_t callback)
 
     s_scan_callback = callback;
     s_scanning = true;
+    s_defer_ap_restore_until_connect = false;
 
     // If in AP mode, need to temporarily start STA for scanning
     s_restore_ap_on_scan = false;
@@ -871,27 +972,14 @@ esp_err_t wifi_manager_start_scan(wifi_scan_callback_t callback)
 
 esp_err_t wifi_manager_stop_scan(void)
 {
-    if (s_scanning)
-    {
-        esp_wifi_scan_stop();
-        s_scanning = false;
-        s_scan_callback = NULL;
-
-        // Restore AP-only mode if needed
-        if (s_restore_ap_on_scan)
-        {
-            esp_wifi_set_mode(WIFI_MODE_AP);
-            s_restore_ap_on_scan = false;
-        }
-        http_server_publish_wifi_status();
-    }
-    return ESP_OK;
+    return wifi_manager_stop_scan_internal(true);
 }
 
 esp_err_t wifi_manager_stop(void)
 {
     wifi_manager_stop_scan();
     s_restore_ap_on_scan = false;
+    s_defer_ap_restore_until_connect = false;
 
     esp_err_t err = esp_wifi_stop();
     if (err == ESP_ERR_WIFI_NOT_INIT || err == ESP_ERR_WIFI_NOT_STARTED)
@@ -1167,3 +1255,45 @@ bool wifi_manager_has_stored_config(void)
     char ssid[33] = {0};
     return wifi_manager_load_config(ssid, sizeof(ssid), NULL, 0) == ESP_OK && strlen(ssid) > 0;
 }
+
+#ifdef UNIT_TEST
+void wifi_manager_test_reset_state(void)
+{
+    s_wifi_connected = false;
+    s_current_mode = WIFI_MODE_NULL;
+    s_sta_retry_count = 0;
+    s_sta_connecting = false;
+    s_scanning = false;
+    s_scan_callback = NULL;
+    s_restore_ap_on_scan = false;
+    s_defer_ap_restore_until_connect = false;
+    s_keep_ap_during_sta = false;
+}
+
+void wifi_manager_test_set_state(bool scanning, bool restore_ap_on_scan, wifi_mode_t mode)
+{
+    s_scanning = scanning;
+    s_restore_ap_on_scan = restore_ap_on_scan;
+    s_current_mode = mode;
+}
+
+bool wifi_manager_test_get_deferred_ap_restore(void)
+{
+    return s_defer_ap_restore_until_connect;
+}
+
+void wifi_manager_test_invoke_event(esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    wifi_event_handler(NULL, base, event_id, event_data);
+}
+
+void wifi_manager_test_invoke_wifi_event(int32_t event_id, void *event_data)
+{
+    wifi_event_handler(NULL, WIFI_EVENT, event_id, event_data);
+}
+
+void wifi_manager_test_invoke_ip_event(int32_t event_id, void *event_data)
+{
+    wifi_event_handler(NULL, IP_EVENT, event_id, event_data);
+}
+#endif
