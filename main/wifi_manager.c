@@ -219,7 +219,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
 #if WIFI_MANAGER_HAS_MDNS
         // Update mDNS
-        mdns_service_txt_item_set("_http", "_tcp", "ip", ip4addr_ntoa(&event->ip_info.ip));
+        mdns_service_txt_item_set("_http", "_tcp", "ip", ip4addr_ntoa((const ip4_addr_t *)&event->ip_info.ip));
 #endif
 
         wifi_mode_t mode = WIFI_MODE_NULL;
