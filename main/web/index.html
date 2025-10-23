@@ -617,7 +617,17 @@
         let ws = null;
         let reconnectTimer = null;
         let statusPollTimer = null;
-        let mouseButtons = { left: false, right: false, middle: false };
+        const MOUSE_BUTTON_NAMES = ['left', 'right', 'middle', 'back', 'forward'];
+        let mouseButtons = {
+            left: false,
+            right: false,
+            middle: false,
+            back: false,
+            forward: false
+        };
+        let lastSentMouseButtons = { ...mouseButtons };
+        const pendingMouse = { dx: 0, dy: 0, wheel: 0, hwheel: 0 };
+        let mouseFrameHandle = null;
         let pointerActive = false;
         let lastPointer = { x: 0, y: 0 };
         let selectedWifiItem = null;
@@ -652,6 +662,99 @@
                 asciiProcessing = true;
                 processAsciiQueue();
             }
+        }
+
+        const requestMouseFrame = (callback) => {
+            if (typeof window.requestAnimationFrame === 'function') {
+                return window.requestAnimationFrame(callback);
+            }
+            return window.setTimeout(callback, 16);
+        };
+
+        const cancelMouseFrame = (handle) => {
+            if (handle === null) {
+                return;
+            }
+            if (typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(handle);
+            } else {
+                clearTimeout(handle);
+            }
+        };
+
+        const clampMouseValue = (value) => {
+            if (!Number.isFinite(value)) {
+                return 0;
+            }
+            if (value > 127) return 127;
+            if (value < -127) return -127;
+            return Math.trunc(value);
+        };
+
+        function buildMouseButtonPayload() {
+            const payload = {};
+            for (const name of MOUSE_BUTTON_NAMES) {
+                payload[name] = !!mouseButtons[name];
+            }
+            return payload;
+        }
+
+        function resetPendingMouse() {
+            pendingMouse.dx = 0;
+            pendingMouse.dy = 0;
+            pendingMouse.wheel = 0;
+            pendingMouse.hwheel = 0;
+        }
+
+        function flushMouse() {
+            const buttonPayload = buildMouseButtonPayload();
+            const hasDelta = pendingMouse.dx !== 0 || pendingMouse.dy !== 0 ||
+                pendingMouse.wheel !== 0 || pendingMouse.hwheel !== 0;
+            const buttonsChanged = MOUSE_BUTTON_NAMES.some(
+                (name) => buttonPayload[name] !== lastSentMouseButtons[name]
+            );
+
+            if (!hasDelta && !buttonsChanged) {
+                return;
+            }
+
+            const payload = {
+                type: 'mouse',
+                dx: clampMouseValue(pendingMouse.dx),
+                dy: clampMouseValue(pendingMouse.dy),
+                wheel: clampMouseValue(pendingMouse.wheel),
+                buttons: {
+                    left: buttonPayload.left,
+                    right: buttonPayload.right,
+                    middle: buttonPayload.middle
+                }
+            };
+
+            if (buttonPayload.back || buttonPayload.forward) {
+                payload.buttons.back = buttonPayload.back;
+                payload.buttons.forward = buttonPayload.forward;
+            }
+
+            if (pendingMouse.hwheel !== 0) {
+                payload.hwheel = clampMouseValue(pendingMouse.hwheel);
+            }
+
+            const sent = sendMessage(payload);
+            resetPendingMouse();
+
+            if (sent) {
+                lastSentMouseButtons = { ...buttonPayload };
+            }
+        }
+
+        function scheduleMouseFlush() {
+            if (mouseFrameHandle !== null) {
+                return;
+            }
+            mouseFrameHandle = requestMouseFrame(() => {
+                mouseFrameHandle = null;
+                flushMouse();
+            });
         }
 
         function markFieldDirty(event) {
@@ -1100,28 +1203,26 @@
             if (!(button in mouseButtons)) {
                 return;
             }
-            mouseButtons[button] = pressed;
-            sendMouseUpdate(0, 0, 0);
+            mouseButtons[button] = !!pressed;
+            sendMouseUpdate(0, 0, 0, 0, { force: true });
         }
 
-        function sendMouseUpdate(dx = 0, dy = 0, wheel = 0) {
-            const clamp = (value) => {
-                if (value > 127) return 127;
-                if (value < -127) return -127;
-                return value;
-            };
+        function sendMouseUpdate(dx = 0, dy = 0, wheel = 0, hwheel = 0, options = {}) {
+            const opts = (typeof options === 'object' && options !== null) ? options : {};
 
-            sendMessage({
-                type: 'mouse',
-                dx: clamp(dx),
-                dy: clamp(dy),
-                wheel: clamp(wheel),
-                buttons: {
-                    left: mouseButtons.left,
-                    right: mouseButtons.right,
-                    middle: mouseButtons.middle
-                }
-            });
+            pendingMouse.dx = clampMouseValue(pendingMouse.dx + dx);
+            pendingMouse.dy = clampMouseValue(pendingMouse.dy + dy);
+            pendingMouse.wheel = clampMouseValue(pendingMouse.wheel + wheel);
+            pendingMouse.hwheel = clampMouseValue(pendingMouse.hwheel + hwheel);
+
+            if (opts.force) {
+                cancelMouseFrame(mouseFrameHandle);
+                mouseFrameHandle = null;
+                flushMouse();
+                return;
+            }
+
+            scheduleMouseFlush();
         }
 
         function scrollWheel(direction) {
@@ -1129,7 +1230,7 @@
                 return;
             }
             const step = direction > 0 ? 1 : -1;
-            sendMouseUpdate(0, 0, step);
+            sendMouseUpdate(0, 0, step, 0, { force: true });
         }
 
         function initMousePad() {
@@ -1148,7 +1249,7 @@
                 lastPointer = { x: event.clientX, y: event.clientY };
                 pad.setPointerCapture(event.pointerId);
                 mouseButtons.left = true;
-                sendMouseUpdate(0, 0, 0);
+                sendMouseUpdate(0, 0, 0, 0, { force: true });
                 event.preventDefault();
             });
 
@@ -1168,7 +1269,7 @@
                 lastPointer = { x: event.clientX, y: event.clientY };
 
                 if (dx !== 0 || dy !== 0) {
-                    sendMouseUpdate(dx, dy, 0);
+                    sendMouseUpdate(dx, dy);
                 }
 
                 event.preventDefault();
@@ -1187,7 +1288,7 @@
                 if (event.type === 'pointerleave' || event.type === 'pointercancel') {
                     mouseButtons.left = false;
                 }
-                sendMouseUpdate(0, 0, 0);
+                sendMouseUpdate(0, 0, 0, 0, { force: true });
                 event.preventDefault();
             };
 

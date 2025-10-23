@@ -11,6 +11,7 @@
 static const char *TAG = "HID_DEVICE";
 
 #define HID_FLUSH_RETRY_DELAY_MS 30
+#define HID_MOUSE_MAX_DELTA 127
 
 typedef struct
 {
@@ -38,6 +39,19 @@ static TimerHandle_t s_retry_timer = NULL;
 static StaticTimer_t s_retry_timer_buffer;
 static portMUX_TYPE s_retry_lock = portMUX_INITIALIZER_UNLOCKED;
 
+static inline int8_t clamp_mouse_delta(int16_t value)
+{
+    if (value > HID_MOUSE_MAX_DELTA)
+    {
+        return HID_MOUSE_MAX_DELTA;
+    }
+    if (value < -HID_MOUSE_MAX_DELTA)
+    {
+        return -HID_MOUSE_MAX_DELTA;
+    }
+    return (int8_t)value;
+}
+
 static bool mouse_states_equal(const mouse_state_t *a, const mouse_state_t *b)
 {
     return a->x == b->x && a->y == b->y && a->wheel == b->wheel &&
@@ -55,8 +69,23 @@ static void hid_device_mouse_queue_push(device_state_t *state, const mouse_state
     {
         size_t last_index = (state->mouse_queue.head + state->mouse_queue.count - 1) %
                             HID_MOUSE_QUEUE_DEPTH;
-        if (mouse_states_equal(&state->mouse_queue.entries[last_index], value))
+        mouse_state_t *last = &state->mouse_queue.entries[last_index];
+
+        if (mouse_states_equal(last, value))
         {
+            return;
+        }
+
+        if (last->buttons == value->buttons &&
+            last->wheel == value->wheel &&
+            last->hwheel == value->hwheel)
+        {
+            int16_t sum_x = (int16_t)last->x + (int16_t)value->x;
+            int16_t sum_y = (int16_t)last->y + (int16_t)value->y;
+
+            last->x = clamp_mouse_delta(sum_x);
+            last->y = clamp_mouse_delta(sum_y);
+            state->mouse_updated = true;
             return;
         }
     }
