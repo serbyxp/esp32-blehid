@@ -42,6 +42,32 @@ static void ws_send_ascii_char(uint8_t ascii);
 static void ws_send_ascii_text(const char *text);
 static void ws_ascii_task(void *arg);
 
+static bool ws_is_expected_disconnect_error(esp_err_t err)
+{
+    switch (err)
+    {
+    case ESP_ERR_INVALID_STATE:
+#ifdef ESP_ERR_HTTPD_INVALID_REQ
+    case ESP_ERR_HTTPD_INVALID_REQ:
+#endif
+#ifdef ESP_ERR_HTTPD_METHOD_NOT_ALLOWED
+    case ESP_ERR_HTTPD_METHOD_NOT_ALLOWED:
+#endif
+#ifdef HTTPD_SOCK_ERR_TIMEOUT
+    case HTTPD_SOCK_ERR_TIMEOUT:
+#endif
+#ifdef HTTPD_SOCK_ERR_INVALID_STATE
+    case HTTPD_SOCK_ERR_INVALID_STATE:
+#endif
+#ifdef HTTPD_SOCK_ERR_FAIL
+    case HTTPD_SOCK_ERR_FAIL:
+#endif
+        return true;
+    default:
+        return false;
+    }
+}
+
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     int fd = httpd_req_to_client_fd(req);
@@ -61,9 +87,16 @@ static esp_err_t ws_handler(httpd_req_t *req)
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "httpd_ws_recv_frame failed: %d", ret);
+        if (ws_is_expected_disconnect_error(ret))
+        {
+            ESP_LOGI(TAG, "WebSocket client (fd=%d) closed connection: %s", fd, esp_err_to_name(ret));
+        }
+        else
+        {
+            ESP_LOGW(TAG, "httpd_ws_recv_frame failed (fd=%d): %s", fd, esp_err_to_name(ret));
+        }
         unregister_client(fd);
-        return ret;
+        return ws_is_expected_disconnect_error(ret) ? ESP_OK : ret;
     }
 
     if (ws_pkt.len == 0)
@@ -86,10 +119,17 @@ static esp_err_t ws_handler(httpd_req_t *req)
     ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "httpd_ws_recv_frame failed: %d", ret);
+        if (ws_is_expected_disconnect_error(ret))
+        {
+            ESP_LOGI(TAG, "WebSocket client (fd=%d) closed connection during payload read: %s", fd, esp_err_to_name(ret));
+        }
+        else
+        {
+            ESP_LOGW(TAG, "httpd_ws_recv_frame failed during payload read (fd=%d): %s", fd, esp_err_to_name(ret));
+        }
         free(buf);
         unregister_client(fd);
-        return ret;
+        return ws_is_expected_disconnect_error(ret) ? ESP_OK : ret;
     }
 
     if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE)
