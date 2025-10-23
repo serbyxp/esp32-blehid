@@ -682,6 +682,17 @@
             }
         };
 
+        const MAX_ACCUMULATED_MOUSE_DELTA = 32767;
+
+        const normalizeMouseDelta = (value) => {
+            if (!Number.isFinite(value)) {
+                return 0;
+            }
+            if (value > MAX_ACCUMULATED_MOUSE_DELTA) return MAX_ACCUMULATED_MOUSE_DELTA;
+            if (value < -MAX_ACCUMULATED_MOUSE_DELTA) return -MAX_ACCUMULATED_MOUSE_DELTA;
+            return Math.trunc(value);
+        };
+
         const clampMouseValue = (value) => {
             if (!Number.isFinite(value)) {
                 return 0;
@@ -708,8 +719,14 @@
 
         function flushMouse() {
             const buttonPayload = buildMouseButtonPayload();
-            const hasDelta = pendingMouse.dx !== 0 || pendingMouse.dy !== 0 ||
-                pendingMouse.wheel !== 0 || pendingMouse.hwheel !== 0;
+            const accumulated = {
+                dx: normalizeMouseDelta(pendingMouse.dx),
+                dy: normalizeMouseDelta(pendingMouse.dy),
+                wheel: normalizeMouseDelta(pendingMouse.wheel),
+                hwheel: normalizeMouseDelta(pendingMouse.hwheel)
+            };
+            const hasDelta = accumulated.dx !== 0 || accumulated.dy !== 0 ||
+                accumulated.wheel !== 0 || accumulated.hwheel !== 0;
             const buttonsChanged = MOUSE_BUTTON_NAMES.some(
                 (name) => buttonPayload[name] !== lastSentMouseButtons[name]
             );
@@ -718,31 +735,50 @@
                 return;
             }
 
-            const payload = {
-                type: 'mouse',
-                dx: clampMouseValue(pendingMouse.dx),
-                dy: clampMouseValue(pendingMouse.dy),
-                wheel: clampMouseValue(pendingMouse.wheel),
-                buttons: {
-                    left: buttonPayload.left,
-                    right: buttonPayload.right,
-                    middle: buttonPayload.middle
+            let remaining = { ...accumulated };
+            let firstReport = true;
+            let sentAny = false;
+
+            while (firstReport || remaining.dx !== 0 || remaining.dy !== 0 ||
+                remaining.wheel !== 0 || remaining.hwheel !== 0) {
+                const dxChunk = clampMouseValue(remaining.dx);
+                const dyChunk = clampMouseValue(remaining.dy);
+                const wheelChunk = clampMouseValue(remaining.wheel);
+                const hwheelChunk = clampMouseValue(remaining.hwheel);
+
+                remaining.dx -= dxChunk;
+                remaining.dy -= dyChunk;
+                remaining.wheel -= wheelChunk;
+                remaining.hwheel -= hwheelChunk;
+
+                const payload = {
+                    type: 'mouse',
+                    dx: dxChunk,
+                    dy: dyChunk,
+                    wheel: wheelChunk,
+                    buttons: {
+                        left: buttonPayload.left,
+                        right: buttonPayload.right,
+                        middle: buttonPayload.middle
+                    }
+                };
+
+                if (buttonPayload.back || buttonPayload.forward) {
+                    payload.buttons.back = buttonPayload.back;
+                    payload.buttons.forward = buttonPayload.forward;
                 }
-            };
 
-            if (buttonPayload.back || buttonPayload.forward) {
-                payload.buttons.back = buttonPayload.back;
-                payload.buttons.forward = buttonPayload.forward;
+                if (hwheelChunk !== 0) {
+                    payload.hwheel = hwheelChunk;
+                }
+
+                const sent = sendMessage(payload);
+                sentAny = sentAny || sent;
+                firstReport = false;
             }
-
-            if (pendingMouse.hwheel !== 0) {
-                payload.hwheel = clampMouseValue(pendingMouse.hwheel);
-            }
-
-            const sent = sendMessage(payload);
             resetPendingMouse();
 
-            if (sent) {
+            if (sentAny) {
                 lastSentMouseButtons = { ...buttonPayload };
             }
         }
@@ -1210,10 +1246,15 @@
         function sendMouseUpdate(dx = 0, dy = 0, wheel = 0, hwheel = 0, options = {}) {
             const opts = (typeof options === 'object' && options !== null) ? options : {};
 
-            pendingMouse.dx = clampMouseValue(pendingMouse.dx + dx);
-            pendingMouse.dy = clampMouseValue(pendingMouse.dy + dy);
-            pendingMouse.wheel = clampMouseValue(pendingMouse.wheel + wheel);
-            pendingMouse.hwheel = clampMouseValue(pendingMouse.hwheel + hwheel);
+            const dxDelta = normalizeMouseDelta(dx);
+            const dyDelta = normalizeMouseDelta(dy);
+            const wheelDelta = normalizeMouseDelta(wheel);
+            const hwheelDelta = normalizeMouseDelta(hwheel);
+
+            pendingMouse.dx = normalizeMouseDelta(pendingMouse.dx + dxDelta);
+            pendingMouse.dy = normalizeMouseDelta(pendingMouse.dy + dyDelta);
+            pendingMouse.wheel = normalizeMouseDelta(pendingMouse.wheel + wheelDelta);
+            pendingMouse.hwheel = normalizeMouseDelta(pendingMouse.hwheel + hwheelDelta);
 
             if (opts.force) {
                 cancelMouseFrame(mouseFrameHandle);
